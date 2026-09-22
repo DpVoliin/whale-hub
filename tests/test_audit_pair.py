@@ -120,5 +120,53 @@ class TestPair(unittest.TestCase):
         self.assertIn("pair_claim", acts)
 
 
+class TestWebPages(unittest.TestCase):
+    """网页渲染的回归测试。
+
+    为什么必须有：这个 bug 是"页面能打开、但内容全是坏的"——肉眼一眼看不出、
+    只有在浏览器里真看一眼才会发现（`/dash` 从写出来就一直是坏的）。
+    所以用机器盯住：str 必须原样发，dict 才 JSON。
+    """
+
+    def setUp(self):
+        self.h = load_hub()
+
+    def _send_as(self, body, ctype="application/json; charset=utf-8"):
+        class Fake:
+            def __init__(self):
+                self.buf = []
+                self.wfile = self
+            def send_response(self, *a): pass
+            def send_header(self, *a): pass
+            def end_headers(self): pass
+            def write(self, data): self.buf.append(data)
+        f = Fake()
+        self.h.Handler._send(f, 200, body, ctype)
+        return b"".join(f.buf)
+
+    def test_字符串原样发_不JSON编码(self):
+        html = "<!doctype html><html lang=zh><meta charset=utf-8>"
+        got = self._send_as(html, "text/html; charset=utf-8")
+        self.assertEqual(got, html.encode("utf-8"))
+        self.assertFalse(got.startswith(b'"'), "不能多一个 JSON 引号")
+        self.assertNotIn(b"\\n", got, "真换行不能被转义成字面量 \\n")
+
+    def test_字典仍然走JSON(self):
+        got = self._send_as({"ok": True})
+        self.assertEqual(got, b'{"ok": true}')
+
+    def test_管理台页面没有字面量转义(self):
+        for page in (self.h.admin_html(), self.h.login_html(), self.h.dash_html()):
+            self.assertIn("<!doctype html", page)
+            self.assertNotIn("\\n", page, "页面里不该出现字面量 \\n")
+            self.assertNotIn('\\"', page, "页面里不该出现被转义的引号")
+        self.assertIn("中枢管理台", self.h.admin_html())
+
+    def test_管理台会把当前配置填进表单(self):
+        page = self.h.admin_html()
+        self.assertIn('name=quiet_from type=number min=0 max=23 value="%s"' % self.h.CFG["care"]["quiet_hours"][0], page)
+        self.assertIn('name=daily_max type=number min=0 max=50 value="%s"' % self.h.CFG["care"]["daily_max"], page)
+
+
 if __name__ == "__main__":
     unittest.main()

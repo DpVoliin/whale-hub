@@ -68,7 +68,7 @@ except OSError:
     pass
 CFG_PATH = os.path.join(BASE, "hub.json")
 DB_PATH = os.path.join(BASE, "hub.db")
-VERSION = "0.1.14"
+VERSION = "0.1.15"
 TZ = timezone(timedelta(hours=8))          # 北京时间（用户在国内，固定 +8，避免服务器 UTC 漂移）
 
 DEFAULT_CFG = {
@@ -3136,7 +3136,20 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- 工具
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
-        data = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode()
+        # ★ 三种 body 分开处理，别一律 json.dumps：
+        #   · bytes → 原样发
+        #   · str   → 调用方**已经备好原文**（HTML / 纯文本），直接 utf-8 发
+        #   · 其它（dict / list）→ 才是 JSON
+        #   踩过的坑：以前对 str 也 json.dumps，于是 HTML 变成
+        #   "\"<!doctype html>…\n<meta …>\"" —— 前导多一个引号、真换行变**字面量 \n**、
+        #   CSS 里的 "Segoe UI" 被转义成 \" → 页面"能打开但全是坏的"（/dash 从写出来就这样，
+        #   管理台也中招；只有在浏览器里真看一眼才发现）。
+        if isinstance(body, (bytes, bytearray, memoryview)):
+            data = bytes(body)
+        elif isinstance(body, str):
+            data = body.encode("utf-8")
+        else:
+            data = json.dumps(body, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))

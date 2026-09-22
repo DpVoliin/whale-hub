@@ -39,12 +39,23 @@ jobs:
       - name: 构建（没有发布密钥 → release 走未签名，不会失败）
         working-directory: collector
         run: |
+          set -o pipefail                     # ★ 不加这个，`| tee` 会把 gradle 的失败码吃掉
           echo "--- 工具链（排障用：失败时一眼看出是哪一版）---"
           java -version
           gradle --version | head -6
           echo "--- 开始构建 ---"
           # --stacktrace：失败时日志里就有可读的根因，不用再猜
-          gradle --no-daemon --stacktrace :app:assembleDebug :app:assembleRelease
+          gradle --no-daemon --stacktrace :app:assembleDebug :app:assembleRelease 2>&1 | tee /tmp/build.log
+
+      # ★ 为什么要有这一步：Actions 的**原始日志**要仓库权限才读得到，
+      #   但 check-run 的 **annotation 是公开可读的**。外部贡献者（和我）拿不到日志时，
+      #   靠这条注解就能看到真正的报错，不用让人贴截图。
+      - name: 失败时把 Gradle 报错摘成注解
+        if: failure()
+        run: |
+          if [ -f /tmp/build.log ]; then
+            echo "::error::$(grep -iE 'error|failed|what went wrong|Caused by|requires|Minimum supported|Unsupported|not compatible' /tmp/build.log | tail -12 | tr '\n' '~' | head -c 3500)"
+          fi
 
       - name: 校验产物存在
         working-directory: collector
