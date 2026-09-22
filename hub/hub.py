@@ -68,7 +68,7 @@ except OSError:
     pass
 CFG_PATH = os.path.join(BASE, "hub.json")
 DB_PATH = os.path.join(BASE, "hub.db")
-VERSION = "0.1.15"
+VERSION = "0.1.16"
 TZ = timezone(timedelta(hours=8))          # 北京时间（用户在国内，固定 +8，避免服务器 UTC 漂移）
 
 DEFAULT_CFG = {
@@ -445,7 +445,7 @@ def episode_search(q, limit=8):
         return []
 
 
-def decision_log(kind, gap_sec=None, reason="", material=None, said=None, band=None):
+def decision_log(kind, gap_sec=None, reason="", material=None, said=None, band=None, ctx=None):
     """★ 结构化决策日志：把"为什么这么决定"落成**可回放的字段**，而不是只写一行中文理由。
 
     为什么必须有（外部评审点出来的真问题）：只记文本理由 = 一个月后完全回放不了，
@@ -453,14 +453,18 @@ def decision_log(kind, gap_sec=None, reason="", material=None, said=None, band=N
     """
     try:
         with db() as c:
-            c.execute("INSERT INTO decisions(ts, day, kind, gap_sec, reason, material, said, band) "
-                      "VALUES (?,?,?,?,?,?,?,?)",
+            try:      # ctx = 做决定时的输入（band/material/said/silent/hour），回放靠它
+                _ctx = json.dumps(ctx, ensure_ascii=False)[:400] if isinstance(ctx, (dict, list)) else str(ctx or "")[:400]
+            except Exception:
+                _ctx = ""
+            c.execute("INSERT INTO decisions(ts, day, kind, gap_sec, reason, material, said, band, ctx) "
+                      "VALUES (?,?,?,?,?,?,?,?,?)",
                       (now_iso(), today_str(), str(kind)[:24],
                        int(gap_sec) if gap_sec is not None else None,
                        str(reason or "")[:200],
                        int(material) if material is not None else None,
                        int(said) if said is not None else None,
-                       str(band or "")[:24]))
+                       str(band or "")[:24], _ctx))
     except Exception as e:
         print(f"[decision] 写入失败：{str(e)[:60]}", flush=True)
 
@@ -580,7 +584,10 @@ def init_db():
         CREATE TABLE IF NOT EXISTS decisions(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ts TEXT, day TEXT, kind TEXT, gap_sec INTEGER,
-            reason TEXT, material INTEGER, said INTEGER, band TEXT);
+            reason TEXT, material INTEGER, said INTEGER, band TEXT,
+            -- ★ ctx：做决定时的**输入**（band/material/said/silent/hour 的 JSON）。
+            --   有输入才能真回放（换参数重算"当时会怎么决定"）；只有结论就只能猜。
+            ctx TEXT DEFAULT '');
         CREATE TABLE IF NOT EXISTS seen_events(
             event_id TEXT PRIMARY KEY, ts TEXT);
         CREATE TABLE IF NOT EXISTS episodes(
@@ -623,6 +630,16 @@ def init_db():
             used_by TEXT DEFAULT ''
         );
         """)
+        # ★ 旧库补列必须在 executescript **之外**，而且要先查有没有：
+        #   ALTER 加已有列会报 "duplicate column name"，而 executescript 里一报错
+        #   整个 init_db 就中断 —— 结果是"第二次启动起不来"（压测时踩到，必改）。
+        try:
+            _cols = {r[1] for r in c.execute("PRAGMA table_info(decisions)")}
+            if "ctx" not in _cols:
+                c.execute("ALTER TABLE decisions ADD COLUMN ctx TEXT DEFAULT ''")
+                print("[db] 迁移：decisions 补上 ctx 列（回放要用）", flush=True)
+        except Exception as e:
+            print("[db] 补 ctx 列失败（不影响其它功能）：%s" % str(e)[:70], flush=True)
 
 
 def now_iso():
@@ -1359,13 +1376,30 @@ def is_game(app, pkg):
     return any(h.lower() in hay for h in GAME_HINTS)
 
 
+_CAT_APP_CACHE = {}
+
+
 def cat_app(name, pkg=""):
-    """具体应用名 → 分类标签（模型只看得到分类）。"""
+    """具体应用名 → 分类标签（模型只看得到分类）。
+
+    ★ 记忆化：它是**纯函数**（name+pkg 决定结果），但压测发现一次 `llm_context()`
+    要调它 **14 万次**（30 天 × 每 10 分钟一轮的 app.usage_minutes 行），每次还线性扫一遍
+    分类表 → 单次 llm_context 从 60ms 涨到 2 秒。实际不同 App 名只有几个，缓存住即可。
+    """
+    key = (name, pkg)
+    hit = _CAT_APP_CACHE.get(key)
+    if hit is not None:
+        return hit
     hay = f"{name} {pkg}".lower()
+    out = "其他"
     for label, keys in _APP_CATS:
         if any(k in hay for k in keys):
-            return label
-    return "其他"
+            out = label
+            break
+    if len(_CAT_APP_CACHE) > 512:      # 别让缓存无限长（App 名理论上可能很多）
+        _CAT_APP_CACHE.clear()
+    _CAT_APP_CACHE[key] = out
+    return out
 
 
 def cat_event(title):
@@ -1699,8 +1733,20 @@ def _day_series(c, metric, days=21, kind="peak", floor=0.0):
 def _cat_day_series(c, days=21):
     """{类别: {日期: 分钟}} —— 与 llm_context 同口径：每个 App 取当天最新，再按类别相加。"""
     d0 = (datetime.now(TZ) - timedelta(days=days)).strftime("%Y-%m-%d")
-    rows = c.execute("SELECT day, ts, value, meta FROM metrics WHERE day>=? AND metric='app.usage_minutes' "
-                     "ORDER BY ts ASC", (d0,)).fetchall()
+    # ★ 先在库里把「每个 App 当天最新」压出来，别再拉几万行回 Python 逐行 json.loads。
+    #   压测实测（40 万行）：原写法 21 天要拉 14 万行 + 14 万次 json.loads →
+    #   单次 llm_context 2 秒（而她每次开口前都要算一次）。
+    #   窗口函数需要 SQLite ≥3.25；没有就退回旧写法（功能不变，只是慢）。
+    try:
+        rows = c.execute(
+            "SELECT day, ts, value, meta FROM ("
+            "  SELECT day, ts, value, meta,"
+            "         ROW_NUMBER() OVER (PARTITION BY day, meta ORDER BY ts DESC) rn"
+            "  FROM metrics WHERE day>=? AND metric='app.usage_minutes'"
+            ") WHERE rn=1", (d0,)).fetchall()
+    except Exception:
+        rows = c.execute("SELECT day, ts, value, meta FROM metrics "
+                         "WHERE day>=? AND metric='app.usage_minutes' ORDER BY ts ASC", (d0,)).fetchall()
     latest = {}                                   # (day, pkg) -> (类别, 分钟)
     for r in rows:
         try:
@@ -3450,7 +3496,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 decision_log(str(b.get("kind") or "speak"), float(b.get("gap_sec") or 0),
                              str(b.get("reason") or "")[:200], int(b.get("material") or 0),
-                             int(b.get("said") or 0), str(b.get("band") or ""))
+                             int(b.get("said") or 0), str(b.get("band") or ""),
+                             b.get("ctx"))
                 return self._send(200, {"ok": True})
             except Exception as e:
                 return self._send(500, {"ok": False, "error": "%s: %s" % (type(e).__name__, str(e)[:80])})

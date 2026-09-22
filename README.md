@@ -96,7 +96,7 @@ curl -s -H "X-Token: $TOKEN" http://127.0.0.1:11440/llm-preview | head -40
 | `desktop/` | **桌面挂件**（Windows，Python + tkinter）：透明置顶角色、表情切换、气泡说话、电脑使用时长采集。**不含美术素材**（版权原因）—— 用 `tools/make_placeholder.sh` 生成占位图，或放自己的图，见 `desktop/assets/README.md` |
 | `desktop/` | **Windows 桌面挂件 + 电脑采集**（同一个 exe，零依赖）；见 `desktop/使用说明.md` |
 | `hub/src/whalecare/` | **源码真相**：按职责切成的 13 个片段（合并顺序＝文件名前缀）|
-| `hub/tools/` | `build_single.py` 合并成单文件；`split_hub.py` 迁移期切片 |
+| `hub/tools/` | `build_single.py` 合并成单文件；`split_hub.py` 迁移期切片；**`stress_report.py`** 压测报告；**`tune_gap.py`** 反事实回放调参 |
 | `hub/ext/` | **外挂扩展**：放一个 .py 就多一个数据源（契约与示例见 `docs/EXTENSIONS.md`）|
 | `tests/` | 脱敏回归测试集（换模型/改 prompt 都跑一遍）|
 | `docs/adr/` | **架构决策记录**：每个大决定 200 字（为什么选、为什么没选另一个）|

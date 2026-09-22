@@ -631,8 +631,14 @@ def _log_decision(kind: str, gap_sec: float, reason: str, material: int, st: dic
     except Exception:
         band = ""
     try:
+        # ★ 把"做决定时用到的输入"也存下来（band/material/said/silent/hour）：
+        #   存了输入，以后才能**真回放**（换一组参数重算"当时会怎么决定"）；
+        #   只存结论的话，回放只能靠猜 —— 这是 docs/DECISIONS.md 里记的那个教训。
         hub("/decision", {"kind": kind, "gap_sec": int(gap_sec), "reason": str(reason)[:180],
-                          "material": int(material), "said": int(st.get("said", 0)), "band": band})
+                          "material": int(material), "said": int(st.get("said", 0)), "band": band,
+                          "ctx": {"band": band, "material": int(material), "said": int(st.get("said", 0)),
+                                  "silent": int(st.get("silent", 0)),
+                                  "hour": int(__import__("datetime").datetime.now(TZ).hour)}})
     except Exception as e:
         _dbg("决策日志上报失败（不影响说话）：%s" % str(e)[:60])
 

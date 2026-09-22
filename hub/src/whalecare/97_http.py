@@ -424,7 +424,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 decision_log(str(b.get("kind") or "speak"), float(b.get("gap_sec") or 0),
                              str(b.get("reason") or "")[:200], int(b.get("material") or 0),
-                             int(b.get("said") or 0), str(b.get("band") or ""))
+                             int(b.get("said") or 0), str(b.get("band") or ""),
+                             b.get("ctx"))
                 return self._send(200, {"ok": True})
             except Exception as e:
                 return self._send(500, {"ok": False, "error": "%s: %s" % (type(e).__name__, str(e)[:80])})

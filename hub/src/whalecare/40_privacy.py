@@ -35,13 +35,30 @@ def is_game(app, pkg):
     return any(h.lower() in hay for h in GAME_HINTS)
 
 
+_CAT_APP_CACHE = {}
+
+
 def cat_app(name, pkg=""):
-    """具体应用名 → 分类标签（模型只看得到分类）。"""
+    """具体应用名 → 分类标签（模型只看得到分类）。
+
+    ★ 记忆化：它是**纯函数**（name+pkg 决定结果），但压测发现一次 `llm_context()`
+    要调它 **14 万次**（30 天 × 每 10 分钟一轮的 app.usage_minutes 行），每次还线性扫一遍
+    分类表 → 单次 llm_context 从 60ms 涨到 2 秒。实际不同 App 名只有几个，缓存住即可。
+    """
+    key = (name, pkg)
+    hit = _CAT_APP_CACHE.get(key)
+    if hit is not None:
+        return hit
     hay = f"{name} {pkg}".lower()
+    out = "其他"
     for label, keys in _APP_CATS:
         if any(k in hay for k in keys):
-            return label
-    return "其他"
+            out = label
+            break
+    if len(_CAT_APP_CACHE) > 512:      # 别让缓存无限长（App 名理论上可能很多）
+        _CAT_APP_CACHE.clear()
+    _CAT_APP_CACHE[key] = out
+    return out
 
 
 def cat_event(title):

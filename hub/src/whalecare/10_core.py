@@ -276,7 +276,7 @@ def episode_search(q, limit=8):
         return []
 
 
-def decision_log(kind, gap_sec=None, reason="", material=None, said=None, band=None):
+def decision_log(kind, gap_sec=None, reason="", material=None, said=None, band=None, ctx=None):
     """★ 结构化决策日志：把"为什么这么决定"落成**可回放的字段**，而不是只写一行中文理由。
 
     为什么必须有（外部评审点出来的真问题）：只记文本理由 = 一个月后完全回放不了，
@@ -284,14 +284,18 @@ def decision_log(kind, gap_sec=None, reason="", material=None, said=None, band=N
     """
     try:
         with db() as c:
-            c.execute("INSERT INTO decisions(ts, day, kind, gap_sec, reason, material, said, band) "
-                      "VALUES (?,?,?,?,?,?,?,?)",
+            try:      # ctx = 做决定时的输入（band/material/said/silent/hour），回放靠它
+                _ctx = json.dumps(ctx, ensure_ascii=False)[:400] if isinstance(ctx, (dict, list)) else str(ctx or "")[:400]
+            except Exception:
+                _ctx = ""
+            c.execute("INSERT INTO decisions(ts, day, kind, gap_sec, reason, material, said, band, ctx) "
+                      "VALUES (?,?,?,?,?,?,?,?,?)",
                       (now_iso(), today_str(), str(kind)[:24],
                        int(gap_sec) if gap_sec is not None else None,
                        str(reason or "")[:200],
                        int(material) if material is not None else None,
                        int(said) if said is not None else None,
-                       str(band or "")[:24]))
+                       str(band or "")[:24], _ctx))
     except Exception as e:
         print(f"[decision] 写入失败：{str(e)[:60]}", flush=True)
 
@@ -411,7 +415,10 @@ def init_db():
         CREATE TABLE IF NOT EXISTS decisions(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ts TEXT, day TEXT, kind TEXT, gap_sec INTEGER,
-            reason TEXT, material INTEGER, said INTEGER, band TEXT);
+            reason TEXT, material INTEGER, said INTEGER, band TEXT,
+            -- ★ ctx：做决定时的**输入**（band/material/said/silent/hour 的 JSON）。
+            --   有输入才能真回放（换参数重算"当时会怎么决定"）；只有结论就只能猜。
+            ctx TEXT DEFAULT '');
         CREATE TABLE IF NOT EXISTS seen_events(
             event_id TEXT PRIMARY KEY, ts TEXT);
         CREATE TABLE IF NOT EXISTS episodes(
@@ -454,6 +461,16 @@ def init_db():
             used_by TEXT DEFAULT ''
         );
         """)
+        # ★ 旧库补列必须在 executescript **之外**，而且要先查有没有：
+        #   ALTER 加已有列会报 "duplicate column name"，而 executescript 里一报错
+        #   整个 init_db 就中断 —— 结果是"第二次启动起不来"（压测时踩到，必改）。
+        try:
+            _cols = {r[1] for r in c.execute("PRAGMA table_info(decisions)")}
+            if "ctx" not in _cols:
+                c.execute("ALTER TABLE decisions ADD COLUMN ctx TEXT DEFAULT ''")
+                print("[db] 迁移：decisions 补上 ctx 列（回放要用）", flush=True)
+        except Exception as e:
+            print("[db] 补 ctx 列失败（不影响其它功能）：%s" % str(e)[:70], flush=True)
 
 
 def now_iso():
