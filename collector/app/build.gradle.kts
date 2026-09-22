@@ -86,7 +86,6 @@ android {
     // Kotlin 的 jvmTarget 不再手写：AGP 9 的内置 Kotlin 会跟随上面的 compileOptions（17）。
     // 少一个手写旋钮 = 少一处"两边版本不一致"的失败点；真需要单独指定时再按 AGP 9 文档加回。
 }
-}
 
 dependencies {
     implementation(libs.androidx.core)
