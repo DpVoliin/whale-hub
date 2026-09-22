@@ -82,6 +82,22 @@ class VersionConsistencyTest(unittest.TestCase):
         self.assertIsNotNone(m, "包壳里找不到 __version__")
         self.assertEqual(m.group(1), self.v, "whalecare/__init__.py 的版本落后了")
 
+    def test_collector_compilesdk_is_installable(self):
+        """采集器的 compileSdk 必须是真实存在的平台。
+
+        2026-09-22 踩过：仓库写着 37，但 `platforms;android-37` 不存在 → 构建直接失败；
+        而本机那份是 36 所以"我这儿能编" —— 典型的仓库/本地漂移。加这条防复发。
+        """
+        p = ROOT / "collector" / "app" / "build.gradle.kts"
+        if not p.is_file():
+            self.skipTest("没有采集器工程")
+        text = p.read_text(encoding="utf-8")
+        m = re.search(r"compileSdk\s*=\s*(\d+)", text)
+        self.assertIsNotNone(m, "找不到 compileSdk")
+        sdk = int(m.group(1))
+        self.assertLessEqual(sdk, 36, f"compileSdk={sdk} 目前没有可安装平台，构建会失败")
+        self.assertGreaterEqual(sdk, 26, f"compileSdk={sdk} 太低")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

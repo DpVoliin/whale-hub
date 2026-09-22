@@ -80,9 +80,10 @@ python3 collector/tools/check_apk.py <你的.apk> --host <你的IP>:11443
 | JDK | **17.0.20**（OpenJDK） | AGP 9.x 要求 JDK 17+ |
 | Gradle | **8.11.1** | 仓库不带 wrapper 时用系统 gradle |
 | Android Gradle Plugin | **9.4.1** | AGP 9 **内置 Kotlin**，不再 apply `kotlin.android` |
-| compileSdk / targetSdk | **37** | |
+| compileSdk / targetSdk | **36** | ⚠️ 别写 37：`platforms;android-37` 不存在，写了会 `Failed to find target android-37` |
 | minSdk | **26** | Android 8.0 |
 | Build-Tools | **36.0.0**（35.0.0 也在） | |
+| SDK 平台 | **platforms;android-36** | 必须已安装，否则同上报错 |
 | 产物 | `:app:assembleDebug` → 3.59 MB · `:app:assembleRelease` → 未签名 2.74 MB | CI 的 android 任务同样跑这两个 |
 
 **一次能复现的命令**（与 CI 一致）：
