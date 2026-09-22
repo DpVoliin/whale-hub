@@ -226,22 +226,44 @@ def material_score(ctx: dict) -> tuple:
     if _r is not _MISS:
         return _r
     score, why = 0, []
-    w = ctx.get("weather_today") or {}
-    if isinstance(w.get("rain_prob"), (int, float)) and w["rain_prob"] >= 60:
-        score += 1; why.append(f"今天降雨 {int(w['rain_prob'])}%")
+    # ★★ 这里读的每个键，都必须是**中枢 llm_context 真的会给的键**。
+    #   踩过的坑（2026-09-22 从决策日志里发现的）：原来读 weather_today.rain_prob /
+    #   classes_today / games_minutes_today，而中枢给的是 weather_today.desc（"雷阵雨"）/
+    #   classes（列表）/ 根本没有游戏时长 —— 字段名对不上时**不报错、只是永远算 0 分**，
+    #   于是"今天雷阵雨、电脑磁盘只剩 1.1%"这种明摆着的料一个都没算进去。
+    #   tests/test_material_signals.py 把这件事钉住了（读的键必须存在或明确列为可选）。
+    wt = ctx.get("weather_today") or {}
+    wn = ctx.get("weather_now") or {}
+    rain = 0.0
+    for k, mult in (("rain_24h", 1.0), ("rain_1h", 3.0)):        # 中枢给的降水字段
+        v = wn.get(k)
+        if isinstance(v, (int, float)):
+            rain = max(rain, float(v) * mult)
+    wx_desc = "%s %s" % (wt.get("desc") or "", wn.get("desc") or "")
+    if rain >= 0.5 or any(k in wx_desc for k in ("雨", "雪", "雷", "冰雹", "雾")):
+        score += 1; why.append("今天%s" % (wt.get("desc") or wn.get("desc") or "有降水"))
     b = ctx.get("battery_percent")
     if isinstance(b, (int, float)) and b <= 20 and not ctx.get("battery_charging"):
         score += 1; why.append(f"手机电量 {int(b)}% 未充电")
     for nm, v in (ctx.get("bluetooth_batteries") or {}).items():
         if isinstance(v, dict) and isinstance(v.get("percent"), (int, float)) and v["percent"] <= 20:
             score += 1; why.append(f"{nm} {int(v['percent'])}%")
-    if (ctx.get("classes_today") or 0):
-        score += 1; why.append(f"今天 {ctx['classes_today']} 节课")
+    cls = ctx.get("classes") or []                               # ★ 中枢给的是 classes 列表
+    if isinstance(cls, list) and cls:
+        score += 1; why.append(f"今天 {len(cls)} 节课")
     if (ctx.get("deliveries_7d") or 0) or (ctx.get("orders_7d") or 0):
         score += 1; why.append("有快递/订单")
-    for nm, m in (ctx.get("games_minutes_today") or {}).items():
-        if isinstance(m, (int, float)) and m >= 60:
-            score += 1; why.append(f"{nm} {int(m)} 分钟")
+    # ★ 电脑健康：原来**完全没读** pc_health —— 磁盘剩 1.1% 这种该立刻说的料一分都没算
+    pc = ctx.get("pc_health") or {}
+    df = pc.get("disk_free_percent")
+    if isinstance(df, (int, float)) and df is not None:
+        if df <= 5:
+            score += 2; why.append(f"电脑磁盘只剩 {df:.1f}%")
+        elif df <= 15:
+            score += 1; why.append(f"电脑磁盘 {df:.1f}%")
+    mp = pc.get("mem_percent")
+    if isinstance(mp, (int, float)) and mp >= 92:
+        score += 1; why.append(f"电脑内存 {int(mp)}%")
     scr = ctx.get("screen_total_minutes_today")
     if isinstance(scr, (int, float)) and scr >= 300:
         score += 1; why.append(f"屏幕 {int(scr)} 分钟")
@@ -256,8 +278,15 @@ def material_score(ctx: dict) -> tuple:
         mn = ctx.get("most_notable") or {}
         if mn.get("what"):
             why.append("最反常：%s %s" % (mn.get("what"), mn.get("text") or ""))
-    if not (ctx.get("sleep_minutes") or ctx.get("sleep")):
-        pass
+    # 睡眠：采集端还没接睡眠源 → 这条**允许缺席**（数据没来就不算分，不是 bug）
+    #   注意形状：中枢给的是 ctx["sleep"] = {"minutes_rounded": …, "at": "…"}（**字典**），
+    #   不是一个数字 —— 原来直接当数字用，于是即使有睡眠数据也永远是"不算分"。
+    sm = ctx.get("sleep_minutes")
+    if not isinstance(sm, (int, float)):
+        _s = ctx.get("sleep")
+        sm = _s.get("minutes_rounded") if isinstance(_s, dict) else _s
+    if isinstance(sm, (int, float)) and sm and sm < 390:
+        score += 1; why.append(f"睡眠只 {int(sm)} 分钟")
     return score, why
 
 
