@@ -1,0 +1,57 @@
+name: 功能请求
+description: 想要鲸鲸做点别的
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提之前请先看 `docs/ROADMAP.md` 的 **non-goals**——落在"明确不做"里的想法大概率会被婉拒（不是想法不好，是会让项目偏离"个人自托管工具"的定位）。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题
+      description: 先说问题，再说方案。跳过问题直接说方案容易被误解。
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你想到的做法
+    validations:
+      required: false
+
+  - type: textarea
+    id: alt
+    attributes:
+      label: 现在的替代方案是什么
+      description: 现在你只能用别的方式凑合做这件事吗？
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 这个改动大概会碰到哪一层？
+      options:
+        - 只在 hub/ext 加个扩展（最小侵入，最快被接受）
+        - 中枢核心逻辑
+        - 说话层
+        - 采集器（Android）
+        - 桌面挂件
+        - 文档 / 部署
+        - 不清楚
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: 约束确认
+      options:
+        - label: 这个功能可以不引入第三方运行时依赖（项目的硬约束）
+          required: true
+        - label: 我理解这是个人项目，维护者对功能有取舍权
+          required: true

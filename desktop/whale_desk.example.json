@@ -1,0 +1,143 @@
+{
+  "version": "0.1.0",
+  "pet": {
+    "size": 200,
+    "pos": null,
+    "opacity": 0.97,
+    "chroma": "#010203",
+    "transparent": true,
+    "always_on_top": true,
+    "idle_sleep_seconds": 180,
+    "sleep_opacity": 0.25,
+    "assets": {
+      "idle": "pet.png",
+      "sleep": "pet_sleep.png",
+      "flip": "pet_flip.png",
+      "drag": "pet_drag.png"
+    }
+  },
+  "snap": {
+    "enabled": true,
+    "px": 22,
+    "corners": true
+  },
+  "flip_on_left": true,
+  "press_bounce": true,
+  "sound": {
+    "enabled": true,
+    "kind": "pop"
+  },
+  "click": {
+    "push_queue": true,
+    "data_timeout_seconds": 5
+  },
+  "balance": {
+    "enabled": true,
+    "provider": "deepseek",
+    "api_key": "",
+    "url": "https://api.deepseek.com/user/balance",
+    "refresh_seconds": 60,
+    "low_threshold": 10.0,
+    "unit": "¥"
+  },
+  "hub": {
+    "enabled": true,
+    "base": "https://YOUR_SERVER_IP:11443",
+    "fallback_base": "http://YOUR_SERVER_IP:11440",
+    "token": "YOUR_HUB_TOKEN",
+    "pin_cert": "hub.crt",
+    "allow_http_fallback": true,
+    "refresh_seconds": 60
+  },
+  "collect": {
+    "enabled": true,
+    "device": "pc_windows",
+    "interval_seconds": 300,
+    "idle_threshold_seconds": 120,
+    "sit_alert_minutes": 50
+  },
+  "bubbles": {
+    "first": {
+      "name": "首次点击泡",
+      "rows": [
+        [
+          {
+            "t": "value",
+            "k": "balance",
+            "label": "余额",
+            "fmt": "{u}%.2f",
+            "level": true
+          }
+        ],
+        [
+          {
+            "t": "text",
+            "text": "下一节 {next_class_time} {next_class}（{next_class_room}）"
+          }
+        ],
+        [
+          {
+            "t": "dim",
+            "text": "今天 {classes_today} 节课 · 屏幕 {screen_txt}"
+          }
+        ]
+      ]
+    },
+    "queue": [
+      {
+        "name": "提醒",
+        "rows": [
+          [
+            {
+              "t": "text",
+              "text": "{reminders_1}"
+            }
+          ],
+          [
+            {
+              "t": "dim",
+              "text": "{reminders_2}"
+            }
+          ]
+        ]
+      },
+      {
+        "name": "闲聊",
+        "rows": [
+          [
+            {
+              "t": "random",
+              "weights": [
+                1,
+                1,
+                1
+              ],
+              "lines": [
+                "（歪头）主人，鲸鲸就在桌面这儿守着。",
+                "（翻了翻今天的数据）主人今天还顺利吗。",
+                "（小声）要鲸鲸念一句今天的课吗。"
+              ]
+            }
+          ]
+        ]
+      }
+    ],
+    "error": {
+      "name": "连不上",
+      "rows": [
+        [
+          {
+            "t": "text",
+            "text": "（把数据翻出来又看了眼）连不上中枢，主人。"
+          }
+        ],
+        [
+          {
+            "t": "dim",
+            "text": "{hub_err}"
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,93 @@
+name: Bug 报告
+description: 有东西坏了 / 行为和文档不一致
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        谢谢报告问题。鲸鲸是自托管系统，**你的环境信息是排查的前提**——缺了这三项我基本只能反问一轮。
+
+        ⚠️ **不要贴 `hub.json`、token、或任何真实生活数据**（截图也要涂掉）。脱敏后的日志片段可以。
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: 出问题的是哪一部分？
+      options:
+        - 中枢 hub（hub.py / HTTP 端点 / 数据库）
+        - 说话层 speaker（LLM 改写 / 角色卡）
+        - 手机采集器 collector（Android）
+        - 桌面挂件 desktop（Windows）
+        - 扩展层 hub/ext
+        - 部署脚本 / 文档
+        - 不确定
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 跑 `git log -1 --format=%h` 或看 `hub.py` 启动时打印的 VERSION
+      placeholder: "v0.1.6 / 8b5dd20"
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境
+      description: 中枢系统与 Python 版本、手机型号与 Android 版本（若是采集器问题）
+      placeholder: |
+        中枢：Ubuntu 24.04 / Python 3.11.15
+        手机：vivo X90 / Android 14 / OriginOS 4
+    validations:
+      required: true
+
+  - type: textarea
+    id: deploy
+    attributes:
+      label: 怎么部署的
+      description: 直接用 hub.py？Docker？中继隧道？模型服务商是谁？
+      placeholder: "hub.py 直接跑在内网 NAS，模型走 XXX 网关，采集器连内网 IP"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 期望行为 vs 实际行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. ...
+        2. ...
+        3. 出现 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志（已脱敏）
+      description: 中枢用 `WHALE_DEBUG=1` 启动可打印说话层细节；`hubctl` 有状态命令
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 自查
+      options:
+        - label: 我确认贴出的内容里没有 token、hub.json 内容或真实生活数据
+          required: true
+        - label: 我看过 docs/ROADMAP.md，这不是已知的「计划中」功能
+          required: false

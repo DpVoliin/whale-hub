@@ -1,0 +1,131 @@
+{
+  "version": "0.1.0",
+  "hub": {
+    "base": "https://YOUR_HUB_HOST:11443",
+    "token": "",
+    "pin_cert": "hub.crt"
+  },
+  "device": "pc_windows",
+  "interval_seconds": 300,
+  "idle_threshold_seconds": 120,
+  "sit_alert_minutes": 50,
+  "categories": {
+    "dev": [
+      "code",
+      "pycharm",
+      "idea64",
+      "devenv",
+      "sublime_text",
+      "studio64",
+      "git-bash",
+      "cmd",
+      "powershell",
+      "windowsterminal",
+      "wt",
+      "cursor",
+      "androidstudio",
+      "clion",
+      "webstorm",
+      "goland",
+      "xshell",
+      "putty"
+    ],
+    "browser": [
+      "chrome",
+      "msedge",
+      "firefox",
+      "360se",
+      "360chrome",
+      "qqbrowser",
+      "brave",
+      "opera"
+    ],
+    "study": [
+      "chaoxing",
+      "xuexitong",
+      "学习通",
+      "anki",
+      "foxitreader",
+      "sumatrapdf",
+      "acrobat",
+      "pdf",
+      "notion",
+      "obsidian"
+    ],
+    "office": [
+      "winword",
+      "excel",
+      "powerpnt",
+      "wps",
+      "et",
+      "wpp",
+      "onenote",
+      "visio",
+      "lingxi",
+      "typora"
+    ],
+    "chat": [
+      "wechat",
+      "weixin",
+      "qq",
+      "tim",
+      "dingtalk",
+      "feishu",
+      "lark",
+      "telegram",
+      "discord",
+      "slack"
+    ],
+    "media": [
+      "potplayer",
+      "vlc",
+      "mpc-hc64",
+      "mpv",
+      "bilibili",
+      "cloudmusic",
+      "spotify",
+      "iqiyi",
+      "youku",
+      "qqmusic",
+      "kmplayer"
+    ],
+    "game": [
+      "steam",
+      "原神",
+      "genshinimpact",
+      "yuanshen",
+      "minecraft",
+      "leagueclient",
+      "dota2",
+      "epicgameslauncher",
+      "starrail",
+      "javaw"
+    ],
+    "other": []
+  },
+  "title_hints": {
+    "media": [
+      "bilibili",
+      "youtube",
+      "爱奇艺",
+      "优酷",
+      "腾讯视频",
+      "网易云音乐"
+    ],
+    "study": [
+      "学习通",
+      "网课",
+      "课程",
+      "作业",
+      "论文",
+      "题库"
+    ],
+    "dev": [
+      "github",
+      "stackoverflow",
+      "文档",
+      "api",
+      "debug"
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "_comment": "**合成快照**：形状与真实 /llm-preview 一致，数值全部是编的，不含任何个人数据。",
+  "would_send_to_model": {
+    "date": "2026-01-01",
+    "weekday": "周四",
+    "screen_total_minutes_today": 300,
+    "screen_usage_minutes_by_category": {
+      "短视频/视频": 90,
+      "社交": 60
+    },
+    "battery_percent": 50,
+    "battery_charging": true,
+    "pc_health": {
+      "disk_free_percent": 40.0,
+      "mem_percent": 50.0,
+      "uptime_hours": 2.0,
+      "window_switches_today": 30.0
+    },
+    "weather_now": {
+      "code": 0,
+      "temp": 20
+    },
+    "classes": [],
+    "orders_7d": {
+      "shipping": 0,
+      "paid": 0
+    },
+    "data_health": {},
+    "memory": [
+      "（合成）上周说过要早点睡"
+    ],
+    "ask": {},
+    "_privacy": "已脱敏：不含 App 名、不含原文、不含精确金额",
+    "_unit_note": "所有 *_minutes 字段单位都是分钟，是当天累计值"
+  }
+}

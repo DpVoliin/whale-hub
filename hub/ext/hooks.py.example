@@ -1,0 +1,26 @@
+# -*- coding: utf-8 -*-
+"""钩子示例：改名为 hooks.py 即生效（名字不带 .example 才加载）。
+
+作用：在她要开口之前插一手 —— 可以用来做"按你自己的规则拦掉某类话"、
+"把内容同步一份到别的地方"、"接进你自己的自动化"。
+"""
+
+
+def before_say(text, level="info", kind="care", key=None):
+    """她每次要主动说一句话之前被调用。
+
+    返回字符串 → 用你的话替换这句；返回 None → 保持原样。
+    想拦掉这句：返回 None 不会拦（那会让中枢以为没说过、反复重试）——
+    要拦就返回一个空字符串 ""（中枢会当成"这次不说"）。
+    """
+    # 例：深夜只允许 urgent 的话
+    import time
+    h = time.localtime().tm_hour
+    if (h >= 23 or h < 7) and level != "urgent":
+        return ""
+    return None
+
+
+def on_event(kind, data=None):
+    """中枢内部事件（生成简报、健康异常…）。用来做记录或联动，返回值不参与决策。"""
+    return None

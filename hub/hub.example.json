@@ -1,0 +1,81 @@
+{
+  "port": 11440,
+  "token": "YOUR_HUB_TOKEN",
+  "persona": {
+    "name": "鲸鲸",
+    "self_call": "鲸鲸",
+    "tone": "温柔恭谨的女仆：先接住情绪再给建议，短句、语气软，偶尔俏皮但不越界",
+    "likes": "米饭",
+    "taboo": "绝对不能说鲸鲸胖",
+    "call_user": "主人",
+    "style": "每条消息 1—2 句、短；**句首必须带一处（动作或情绪）标注**，动作要具体（递水 / 戳你 / 翻课表 / 合上账本 / 把灯调暗）；不用项目符号、不用表情符号；称呼「主人」，自称「鲸鲸」；不确定的事直说不知道，不编。",
+    "care_topics": [
+      "（递上一杯水）主人，今天喝水了吗？",
+      "（抬手指了指窗外）眼睛离开屏幕看远处，20 秒就够。",
+      "（翻了翻你的进度本）这周的复习还跟得上吗？",
+      "（歪头看你）今天心情怎么样，说一句就行。",
+      "（拉了拉你的袖子）坐久了，起来伸个懒腰吧。",
+      "（把睡衣搭在椅背上）要不要早点洗漱？"
+    ]
+  },
+  "schedule": {
+    "morning": "07:30",
+    "evening": "22:30"
+  },
+  "care": {
+    "enabled": true,
+    "quiet_hours": [
+      23,
+      7
+    ],
+    "daily_max": 6,
+    "min_gap_minutes": 25,
+    "water_every_hours": 3,
+    "weather": true,
+    "city": {
+      "name": "佛山",
+      "lat": 23.02,
+      "lon": 113.12
+    },
+    "random_care_per_day": 2
+  },
+  "tls": {
+    "port": 11443,
+    "cert": "tls/hub.crt",
+    "key": "tls/hub.key"
+  },
+  "channels": {},
+  "privacy": {
+    "talkative_categories": [
+      "短视频/视频",
+      "游戏",
+      "社交",
+      "购物/生活"
+    ],
+    "min_talk_minutes": 30,
+    "enabled": true,
+    "blur_sleep_to_minutes": 30,
+    "blur_stress_to": 10,
+    "notify_keep_days": 30
+  },
+  "health": {
+    "heart_rate_high": 110,
+    "heart_rate_low": 45,
+    "spo2_low": 92,
+    "stress_high": 80,
+    "sleep_low_minutes": 300,
+    "stale_after_minutes": 180
+  },
+  "rules": {
+    "sleep_low_minutes": 390,
+    "sleep_low_streak_days": 2,
+    "screen_high_minutes": 480,
+    "deep_night_hours": [
+      23,
+      2
+    ],
+    "sit_continuous_minutes": 50,
+    "device_offline_hours": 26,
+    "class_remind_minutes": 0
+  }
+}

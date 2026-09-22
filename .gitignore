@@ -1,0 +1,47 @@
+# ── 运行时数据（隐私敏感：含 token 与真实生活数据，绝不入库）──
+hub.json
+hub/hub.json
+*.json.bak
+hub.db
+hub.db-*
+hub/hub.db
+hub/backup/
+hub/logs/
+*.log
+
+# ── 构建产物 ──
+hub/dist/
+__pycache__/
+*.py[cod]
+*.pyz
+build/
+dist/
+*.egg-info/
+
+# ── 密钥与凭据（泄露即供应链事故）──
+keystore/
+keystore.properties
+*.keystore
+*.jks
+!keystore/debug.keystore
+.env
+.env.local
+*.pem
+*.key
+local.properties
+
+# ── 人设包与个人素材（默认不入库，避免误提交私有内容）──
+persona/local/
+*.local.json
+
+# ── 编辑器 / 系统 ──
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ── 桌面挂件构建 ──
+desktop/build/
+desktop/dist/
+desktop/*.spec

@@ -1,0 +1,130 @@
+# 让 STM32 / C51 这类小设备接入
+
+> 目标：一块十几块钱的单片机 + 一个网口模块（ENC28J60 / W5500 / ESP-01 / ESP8266），
+> 能把传感器读数**一行发上来**，然后就出现在她（AI）能看到的数据里。
+
+## 架构：为什么要一个"中继"
+
+```
+  单片机(明文,一行)                内网中继(mcu_relay.py)              中枢(HTTPS)
+  STM32 / C51  ──HTTP 或 UDP──▶   转发 + 限流 + 日志      ──HTTPS──▶  /api/mcu → SQLite
+```
+
+**取舍讲清楚**：
+- 单片机**解析不了 JSON**、**做不了 TLS**（C51 上跑 TLS 基本不可能，STM32 也很吃力）
+- 但中枢**必须**走 HTTPS —— 明文把 token 丢在公网上等于送人
+- 所以：设备侧越简单越好（一行明文），**TLS 交给中继**。中继跑在你家里任何一台常开设备上
+  （路由器 / 树莓派 / 旧笔记本 / NAS ✓，Windows 也能跑）
+
+## 协议（含抗丢包：序号 + 校验和）
+
+```
+GET /mcu?d=stm32_room&m=temp,hum&v=25.3,61&u=C&s=1024&c=173
+                                                     │        └─ c：校验和（可选）
+                                                     └─ s：递增序号（可选，识别重发）
+```
+- **校验和算法**（C 里一行就能算）：`设备名 + 指标串 + 数值串` 每字符 ASCII 相加，取 `% 256`
+- 中枢验不过回 `err:crc`（脏数据不入库）；带 `s=` 时序号写进 meta，便于排查丢包/重发
+- UDP 同理：`"dev,temp:25.3,seq:1024,crc:173"`
+
+## 设备侧：两种发法（任选）
+
+### A. HTTP 一行 GET（有 TCP 能力的模块都行）
+```
+GET /mcu?d=stm32_room&m=temp,hum&v=25.3,61&u=C HTTP/1.0
+
+```
+- `d` 设备名 · `m` 指标（逗号可并列）· `v` 数值（与 m 一一对应）· `u` 单位
+- 回一行文本：`ok` 或 `err:xxx`（**不用解析 JSON**）
+
+### B. UDP 一行（最短，C51 首选）
+```
+发送 "stm32_room,temp,25.3"                  ← 单指标，20 字节左右
+发送 "stm32_room,temp:25.3,hum:61"           ← 一条报多个
+接收 "ok"
+```
+
+## 中继部署（3 行）
+
+```bash
+export WHALE_HUB=https://YOUR_SERVER_IP:11443
+export WHALE_TOKEN=你的_token
+export WHALE_CA=/opt/whale/hub/tls/hub.crt   # 自签证书就给这个；没有可省
+python3 mcu_relay.py                          # HTTP :8088 + UDP :8089
+```
+
+中继自带：**强制校验证书**（不给 CA 直接拒绝启动）、一分钟 600 次软限流、
+每条转发打一行日志（`设备 → 指标=值 ✓`）、**转发失败先落盘、后台每 20 秒退避补发**。
+
+```bash
+export WHALE_CA=/opt/whale/hub/tls/hub.crt   # 必须给；跳过须显式 WHALE_INSECURE=1（仅调试）
+export WHALE_QUEUE=/var/lib/mcu-queue.jsonl  # 可选：失败队列落盘位置
+```
+
+## STM32 示例（HAL + ESP-01 AT 指令）
+
+```c
+// 1) 拼好一行（别用 sprintf 的浮点，C51/STM32 都容易踩坑）
+char req[96], cmd[128];
+int t10 = (int)(temp * 10);              // 25.3℃ → 253
+sprintf(req, "GET /mcu?d=stm32_room&m=temp&v=%d.%d&u=C HTTP/1.0\r\n\r\n",
+        t10 / 10, t10 % 10);
+
+// 2) 用 AT 指令把这一行发出去
+AT+CIPSTART="TCP","192.168.1.10",8088    // 中继的 内网IP:HTTP端口
+AT+CIPSEND=%d                            // 长度 = strlen(req) + 2
+<把 req 发出去>
+AT+CIPCLOSE
+```
+
+> 用 W5500/ENC28J60 就直接开 socket 发上面那行，更省事。
+
+## C51 示例（STC + ESP8266 AT，UDP 版最短）
+
+```c
+// 一条 UDP 报：dev,metric,value
+char pkt[48];
+int t10 = temp_x10;
+sprintf(pkt, "c51_node,temp,%d.%d", t10 / 10, t10 % 10);
+
+AT+CIPSTART="UDP","192.168.1.10",8089
+AT+CIPSEND=<长度>
+<pkt>
+```
+UDP 的好处：不用建连、不用等响应，**发完就睡**，最省电。
+
+## 指标名怎么起
+
+中枢不限制指标名（`/api/mcu` 直接入库），建议用 `域.项` 风格，她的判断更容易理解：
+
+| 场景 | 建议指标 | 单位 |
+|---|---|---|
+| 温度 / 湿度 | `temp` / `hum`（中继示例里就是这个；想用 `env.temp` 也行） | C / % |
+| 空气质量 | `env.pm25` / `env.co2` | µg/m³ / ppm |
+| 光照 | `env.lux` | lx |
+| 土壤湿度（养花）| `plant.soil` | % |
+| 水位 / 漏水 | `water.level` / `water.leak` | cm / 0-1 |
+| 门磁 / 人体 | `door.open` / `motion.detected` | 0-1 |
+| 自己焊的闹钟 | `device.next_alarm` | 分钟 |
+
+> 想让她主动提，就在 `hub.json` 的 `privacy.talkative_categories` 之外**加一条自定义规则**，
+> 或者干脆让她按上下文自己判断 —— `/llm-preview` 能看到她到底看到了什么。
+
+**上报之后会出现在哪**（这就是"接了一个设备"的完整价值）：
+
+| 位置 | 你会看到什么 |
+|---|---|
+| 微信 | 她主动说话时可能提一句（比如"屋里 26.8℃、湿度 61%，还行"）—— 提不提由她的判断与角色卡决定 |
+| 桌面挂件 | 点她翻到「关心」那一泡：`26.4℃ · 湿度 58%`，与电量/磁盘/连续活跃并列 |
+| `GET /today` | `care.env = {"temp": 26.4, "hum": 58.0}` —— 网页或别的终端也能直接拿 |
+| `GET /llm-preview` | 模型**实际看到**的那一份（脱敏后），可以逐字核对 |
+
+> 口径：`temp` / `hum` 这类**瞬时值**取"最近一次"；当天累计分钟数那种**累计值**取最新、**不要 SUM**。
+
+## 安全建议（重要）
+
+1. **别把中继的 8088/8089 暴露到公网** —— 它是明文口，只该在内网/VPN 里
+2. 给单片机**单独的 token**：`hub.json` 里 `mcu.token` 填一个新值，设备用它；
+   这样设备固件被人拿走，泄的也不是你的主钥匙
+3. 中继那一层已经有软限流；中枢侧同样有 240 次/分 + 1MB 上限
+4. 不要用单片机去读你家里的隐私数据（麦克风/摄像头/门锁状态）—— 它没有加密能力

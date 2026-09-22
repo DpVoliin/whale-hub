@@ -1,0 +1,10 @@
+# 本机运行时产物（含你的 token / 中枢地址，绝不入库）
+whale_desk.json
+whale_pc.json
+*.log
+*-log.txt
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec

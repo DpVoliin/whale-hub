@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whalehub"
+version = "0.1.6"
+description = "鲸鲸 · 自托管的个人数据中枢：常驻、能读你自己的数据、能主动关心"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "DpVoliin" }]
+keywords = ["self-hosted", "local-first", "privacy", "personal-data", "quantified-self", "proactive"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Home Automation",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+]
+# ★ 这一行是机器可读的「零依赖」证明：pip show / 各种依赖扫描工具都会显示 0 dependencies
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/DpVoliin/whale-hub"
+Repository = "https://github.com/DpVoliin/whale-hub"
+Issues = "https://github.com/DpVoliin/whale-hub/issues"
+Changelog = "https://github.com/DpVoliin/whale-hub/blob/main/CHANGELOG.md"
+
+[project.scripts]
+whalehub = "whalehub.__main__:main"
+
+[tool.setuptools]
+# 单文件分发是主线：这里只把合并产物 hub.py 装成可执行模块
+py-modules = []
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+# 单人项目里 ruff 最大的价值：统一你自己三个月前后的写法
+lint.select = ["E", "F", "W", "I", "UP", "B"]
+lint.ignore = ["E501"]          # 长行由 line-length 管，不重复报
+exclude = ["hub/dist", "hub/hub.py"]   # hub.py 是**生成产物**，不对它 lint
+
+[tool.ruff.format]
+quote-style = "preserve"
