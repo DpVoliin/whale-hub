@@ -9,13 +9,18 @@
   ④ 备份**生命周期管理**（默认留最近 N 份）          → test_backup_keeps_only_n
 """
 import importlib.util
+import json
 import os
 import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
 from datetime import datetime
+from http.server import ThreadingHTTPServer
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -134,6 +139,66 @@ class TestConsent(GapsBase):
         self.h.ingest_items([self.HEALTH])
         acts = [r["action"] for r in self.h.audit_recent(10)]
         self.assertIn("ingest_no_consent", acts)
+
+
+class TestConsentRoute(GapsBase):
+    """★ 路由级端到端测试（函数级测试抓不到这一层）。
+
+    为什么必须有它：我第一版把 `/consent` 写进了 `do_GET` → POST 直接 404；
+    第二版又用了不存在的 `self._read_body()` → body 永远是空，接口误报"只支持 what=health"。
+    这两种错**函数级测试全都发现不了** —— 只有真起一个中枢、真打一次 HTTP 才暴露。
+    所以这里用中枢自己的 Handler 起一个临时服务，走完整的请求链路。
+    """
+
+    def test_consent_route_end_to_end(self):
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), self.h.Handler)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{port}"
+        tok = self.h.CFG["token"]
+
+        def post(path, payload):
+            r = urllib.request.Request(
+                base + path, data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json", "X-Token": tok}, method="POST")
+            with urllib.request.urlopen(r, timeout=15) as x:
+                return json.loads(x.read().decode())
+
+        def ingest(item):
+            r = urllib.request.Request(
+                base + "/ingest", data=json.dumps([item]).encode(),
+                headers={"Content-Type": "application/json", "X-Token": tok}, method="POST")
+            with urllib.request.urlopen(r, timeout=15) as x:
+                return json.loads(x.read().decode())
+
+        try:
+            item = {"device": "route-test", "metric": "health.heart_rate", "value": 70}
+            self.assertEqual(ingest(item)["accepted"], 0, "没同意时路由就该丢健康数据")
+            rep = post("/consent", {"what": "health", "granted": True, "device": "route-test"})
+            self.assertTrue(rep.get("ok"), f"/consent 应成功，实际 {rep}")
+            self.assertTrue(rep.get("granted"), "返回里应显示已同意")
+            self.assertEqual(ingest(item)["accepted"], 1, "★ 同意之后必须收下（走真 HTTP）")
+            post("/consent", {"what": "health", "granted": False})
+            self.assertEqual(ingest(item)["accepted"], 0, "撤回后应立刻又被拒")
+        finally:
+            srv.shutdown()
+
+    def test_consent_route_rejects_other_what(self):
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), self.h.Handler)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            r = urllib.request.Request(
+                f"http://127.0.0.1:{port}/consent", data=b'{"what":"location","granted":true}',
+                headers={"Content-Type": "application/json", "X-Token": self.h.CFG["token"]},
+                method="POST")
+            try:
+                urllib.request.urlopen(r, timeout=15)
+                self.fail("不该接受 what=location")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 400, f"应回 400，实际 {e.code}")
+        finally:
+            srv.shutdown()
 
 
 class TestBackupRetention(GapsBase):

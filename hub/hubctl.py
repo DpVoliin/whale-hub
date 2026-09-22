@@ -937,6 +937,11 @@ def main():
     w = sub.add_parser("watch", help="跟着看新数据（Ctrl-C 退出）")
     w.add_argument("-i", "--interval", type=float, default=3.0); w.set_defaults(fn=cmd_watch)
     sub.add_parser("doctor", help="体检（库/端口/磁盘/新鲜度）").set_defaults(fn=cmd_doctor)
+    cn = sub.add_parser("consent", help="显式同意（PIPL）：看状态 / --grant / --revoke")
+    cn.add_argument("--what", default="health")
+    cn.add_argument("--grant", action="store_true")
+    cn.add_argument("--revoke", action="store_true")
+    cn.set_defaults(fn=cmd_consent)
     ev = sub.add_parser("eval", help="离线评估开口策略（回放式：接受率/效用/regret）")
     ev.add_argument("--sweep", action="store_true", help="追加成本权重敏感性扫描")
     ev.add_argument("--json", action="store_true", dest="as_json")
@@ -1040,6 +1045,24 @@ def cmd_eval(a):
                 argv.append("--json")
             raise SystemExit(subprocess.call(argv))
     print("  找不到 policy_eval.py（应与 hubctl.py 同目录，或放在 tools/ 下）")
+
+
+
+
+def cmd_consent(a):
+    """看/给/撤显式同意（PIPL）：默认只显示状态；--grant / --revoke 改。"""
+    if getattr(a, "grant", False) or getattr(a, "revoke", False):
+        what = (getattr(a, "what", None) or "health").strip().lower()
+        mod = _load_product()
+        mod.consent_set(what, bool(getattr(a, "grant", False)), source="hubctl", version="cli")
+        print(f"  ✓ 已{'授予' if getattr(a, 'grant', False) else '撤回'}「{what}」的同意")
+    mod = _load_product()
+    st = mod.consent_status()
+    if not st:
+        print("  （还没有任何同意记录）")
+    for k, v in st.items():
+        print(f"  {k:<10} {'同意' if v['granted'] else '已撤回':<6} 最近一次 {str(v.get('at'))[:19]} "
+              f"（条款 {v.get('version') or '-'}）")
 
 
 if __name__ == "__main__":

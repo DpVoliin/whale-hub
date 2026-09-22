@@ -1,10 +1,10 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:b80a21e3-6b44-4a49-aee2-4e150d9a2156",
+  "serialNumber": "urn:uuid:2f61bec5-ce5a-47c7-ac30-fe3bc3f91045",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-09-22T11:04:12Z",
+    "timestamp": "2026-09-22T11:57:55Z",
     "tools": [
       {
         "vendor": "whalecare",
@@ -14,14 +14,14 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.23",
+      "bom-ref": "pkg:generic/whalecare@0.1.24",
       "name": "whalecare",
-      "version": "0.1.23",
+      "version": "0.1.24",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "107dd944524b08a1368b95d321f4e7efde9d186eae75dd2433bfb171938a0b59"
+          "content": "a8529a9d9b8c1eb701e22836c76e5e057271c3ae713984a819d9a00195637d17"
         }
       ],
       "properties": [
@@ -31,7 +31,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "099c67f12c69227bab0dba5ffc9165d717f15a76"
+          "value": "bb668b617959d7145592e0464c53b334721f62a7"
         }
       ]
     }
@@ -39,14 +39,14 @@
   "components": [
     {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.23",
+      "bom-ref": "pkg:generic/whalecare@0.1.24",
       "name": "whalecare",
-      "version": "0.1.23",
+      "version": "0.1.24",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "107dd944524b08a1368b95d321f4e7efde9d186eae75dd2433bfb171938a0b59"
+          "content": "a8529a9d9b8c1eb701e22836c76e5e057271c3ae713984a819d9a00195637d17"
         }
       ],
       "properties": [
@@ -56,7 +56,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "099c67f12c69227bab0dba5ffc9165d717f15a76"
+          "value": "bb668b617959d7145592e0464c53b334721f62a7"
         }
       ]
     },

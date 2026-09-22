@@ -309,19 +309,6 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         path, q = u.path, parse_qs(u.query)
         # ★ 下面三条**在鉴权之前**：登录页本身不能要求已登录
-        if path == "/consent":
-            # POST {"what":"health","granted":true} → 记录**显式同意**（采集器打开健康开关时调）
-            try:
-                _b = json.loads(self._read_body() or "{}")
-            except Exception:
-                _b = {}
-            _what = str((_b or {}).get("what") or "").strip().lower()
-            if _what != "health":
-                return self._send(400, {"ok": False, "error": "只支持 what=health"})
-            consent_set(_what, bool((_b or {}).get("granted")),
-                        source=(_b or {}).get("device") or self._client(),
-                        version=(_b or {}).get("version") or "")
-            return self._send(200, {"ok": True, "what": _what, "granted": consent_granted(_what)})
         if path == "/login":
             return self._login(q)
         if path == "/logout":
@@ -448,6 +435,22 @@ class Handler(BaseHTTPRequestHandler):
         if _n > MAX_BODY:
             return self._send(413, {"error": f"请求太大，上限 {MAX_BODY // 1024}KB"})
         # 登录/管理台要在鉴权之前（登录本身就是"还没登录"时做的）
+        if path == "/consent":
+            # POST {"what":"health","granted":true} → 记录**显式同意**（采集器打开健康开关时调）
+            # ★ 两个坑都踩过（记下来）：
+            #   ① 第一版放在 do_GET 里 → POST 404（写操作必须在 do_POST）
+            #   ② 用了不存在的 self._read_body() → 永远拿到空 body，误报"只支持 what=health"
+            #   正确姿势是本文件其它路由一致的：self._body()（已解析好的 dict/list）
+            _b = self._body() or {}
+            if not isinstance(_b, dict):
+                _b = {}
+            _what = str((_b or {}).get("what") or "").strip().lower()
+            if _what != "health":
+                return self._send(400, {"ok": False, "error": "只支持 what=health"})
+            consent_set(_what, bool((_b or {}).get("granted")),
+                        source=(_b or {}).get("device") or self._client(),
+                        version=(_b or {}).get("version") or "")
+            return self._send(200, {"ok": True, "what": _what, "granted": consent_granted(_what)})
         if path == "/login":
             return self._login_post()
         if path == "/admin":
