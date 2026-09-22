@@ -978,7 +978,8 @@ def audit_verify():
         prev, checked = row["hash"], checked + 1
     return {"ok": broken is None, "checked": checked, "skipped_legacy": skipped,
             "broken_at": broken,
-            "note": "链完整" if broken is None else "第 %s 条起被改过" % broken}# ----------------------------------------------------------------- 课表 / 日程
+            "note": "链完整" if broken is None else "第 %s 条起被改过" % broken}
+# ----------------------------------------------------------------- 课表 / 日程
 def _timetable():
     with db() as c:
         row = c.execute("SELECT raw, source, updated_at FROM timetable WHERE id=1").fetchone()

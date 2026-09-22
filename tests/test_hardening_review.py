@@ -15,7 +15,6 @@
 import importlib.util
 import os
 import pathlib
-import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta

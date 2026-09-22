@@ -13,7 +13,6 @@ import json
 import os
 import pathlib
 import random
-import sqlite3
 import subprocess
 import sys
 import tempfile

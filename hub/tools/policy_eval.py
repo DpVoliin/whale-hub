@@ -33,8 +33,6 @@ import json
 import os
 import pathlib
 import random
-import re
-import sqlite3
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
