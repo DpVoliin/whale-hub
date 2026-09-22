@@ -144,3 +144,28 @@ so **change a fragment and the product together** (see [`CONTRIBUTING.md`](CONTR
 ## License
 
 MIT. Your data is yours; the code is here to be audited.
+
+## Delivery channels (beyond WeChat)
+
+The primary path is *speaker → gateway webhook → WeChat*. The hub also ships its own
+**direct-send** channels — deliberately **never automatic** (so they can't duplicate the
+speaker), meant for cron / extensions / manual calls. All are plain HTTP, no SDK, no deps:
+
+| Channel | Config keys | Notes |
+|---|---|---|
+| WeCom group bot | `channels.wecom_webhook` | official, no rate limit, one URL |
+| Generic webhook | `channels.generic_webhook` | anything accepting `POST {"text": "..."}` |
+| WeCom app message | `channels.wecom_corpid/secret/agentid` | can target specific members |
+| **ntfy** | `channels.ntfy_url` (+`ntfy_token`) | raw-text `POST` to `https://ntfy.sh/<topic>` |
+| **Bark** | `channels.bark_url` (+`bark_sound`) | iOS, path form `/<key>/<title>/<body>` |
+| **DingTalk** | `channels.dingtalk_webhook` (+`dingtalk_secret`) | official custom-robot webhook, optional official signing |
+| **Discord** | `channels.discord_webhook` | official webhook, `{"content": ...}` |
+| **QQ** | `channels.qq_appid` + `qq_secret` + `qq_target` (+`qq_kind`) | **official bot API** — fetch `access_token`, then `POST /v2/users|groups/<id>/messages` |
+
+Check status with `hubctl channels` (reports *configured / empty* only — never prints the
+webhook URL itself, since that URL is a credential). Send a test with `POST /channels?test=1`.
+
+> If you run this on **Hermes**, prefer its platform plugins for DingTalk / Discord / Feishu /
+> WeCom / ntfy / Telegram / Slack / WhatsApp (`hermes plugins enable <name>-platform`) — those
+> are the maintained, official integrations. The channels above exist so **non-Hermes
+> deployments** can still deliver.

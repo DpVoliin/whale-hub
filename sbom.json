@@ -1,10 +1,10 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:7e3c927f-ccbd-4911-b751-6784f9f5a324",
+  "serialNumber": "urn:uuid:060e37b2-d063-424f-b7c0-5dcbc243073c",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-09-22T10:15:23Z",
+    "timestamp": "2026-09-22T10:28:58Z",
     "tools": [
       {
         "vendor": "whalecare",
@@ -14,14 +14,14 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.21",
+      "bom-ref": "pkg:generic/whalecare@0.1.22",
       "name": "whalecare",
-      "version": "0.1.21",
+      "version": "0.1.22",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "34273c00e214c2aab76ecdcc7595d0e0eae4f8c1da3436406bcaec26948cbc94"
+          "content": "ff775ecea6fac8e586af9e4a22bb6417dfa0b21ff4022a5094c6b0cd6f7f515f"
         }
       ],
       "properties": [
@@ -31,7 +31,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "27a61c74a927a07321c516c1928b27e839aa9ba7"
+          "value": "b4872c7351a9599a1437931522913e89eb1e5b9f"
         }
       ]
     }
@@ -39,14 +39,14 @@
   "components": [
     {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.21",
+      "bom-ref": "pkg:generic/whalecare@0.1.22",
       "name": "whalecare",
-      "version": "0.1.21",
+      "version": "0.1.22",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "34273c00e214c2aab76ecdcc7595d0e0eae4f8c1da3436406bcaec26948cbc94"
+          "content": "ff775ecea6fac8e586af9e4a22bb6417dfa0b21ff4022a5094c6b0cd6f7f515f"
         }
       ],
       "properties": [
@@ -56,7 +56,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "27a61c74a927a07321c516c1928b27e839aa9ba7"
+          "value": "b4872c7351a9599a1437931522913e89eb1e5b9f"
         }
       ]
     },

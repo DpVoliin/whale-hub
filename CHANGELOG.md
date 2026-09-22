@@ -1,3 +1,16 @@
+## v0.1.22
+
+- **直发出口再加三个，全部走官方接口**：
+  - **钉钉** `channels.dingtalk_webhook`（+ 可选 `dingtalk_secret` 走官方加签算法）
+  - **Discord** `channels.discord_webhook`（官方 webhook，`{"content": ...}`）
+  - **QQ** `channels.qq_appid` + `qq_secret` + `qq_target`（**官方机器人 API**：先取
+    `access_token`，再 `POST /v2/users/<openid>/messages` 或 `/v2/groups/<group_openid>/messages`，
+    不装任何 SDK；token 内存缓存并提前 2 分钟续期）
+- 配合 Hermes 平台插件：**钉钉 / Discord / 飞书 / 企业微信 / ntfy / Telegram / Slack / WhatsApp
+  都有官方插件**（bundled，`hermes plugins enable <名>-platform` 即可），本仓库的直发出口
+  是给**非 Hermes 部署**用的那条路。
+- 出口测试扩到 21 项（钉钉 payload 与加签、Discord 204、QQ 取 token + 私聊/群聊路径）。
+
 ## v0.1.21
 
 - **新增两个原生直发出口：ntfy 与 Bark**（issue #14 的前两个）。

@@ -393,8 +393,9 @@ MIT。拿去改成你自己的鲸鲸，随便。
 
 ## 直发出口（除微信外还能发到哪）
 
-主出口是「说话层 → 网关 webhook → 微信」。中枢另外自带**直发**通道（**不自动使用** ——
-避免和说话层重复推送，由 cron / 扩展 / 你手动调）：
+主出口是「说话层 → 网关 webhook → 微信」。中枢另外自带 **8 个直发出口**（**不自动使用** ——
+避免和说话层重复推送，由 cron / 扩展 / 你手动调）—— 其中 6 个走各自平台的**官方接口**，
+QQ 走**官方机器人 API**，全部零第三方依赖：
 
 | 出口 | 配置键 | 说明 |
 |---|---|---|
@@ -403,6 +404,9 @@ MIT。拿去改成你自己的鲸鲸，随便。
 | 企业微信应用消息 | `channels.wecom_corpid/secret/agentid` | 可发给指定成员 |
 | **ntfy** | `channels.ntfy_url` (+`ntfy_token`) | 极简推送，文本 `POST` 到 `https://ntfy.sh/<主题>` 即达 |
 | **Bark** | `channels.bark_url` (+`bark_sound`) | iOS 极简推送，路径式 `/<key>/<标题>/<内容>` |
+| **钉钉** | `channels.dingtalk_webhook` (+`dingtalk_secret`) | 官方自定义机器人，可选官方加签 |
+| **Discord** | `channels.discord_webhook` | 官方 webhook，`{"content": ...}`，单条 2000 字内 |
+| **QQ** | `channels.qq_appid` + `qq_secret` + `qq_target` (+`qq_kind`) | **官方机器人 API**（先取 access_token 再发，不装 SDK）|
 
 看状态：`hubctl channels`（只报"配没配"，不打印地址本身 —— 那带密钥）。
 发测试：`POST /channels?test=1`。

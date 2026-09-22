@@ -44,11 +44,15 @@ class Stub(BaseHTTPRequestHandler):
                     "headers": {k: v for k, v in self.headers.items()}})
         if self.path.startswith("/bark"):
             out, ctype = b'{"code":200,"message":"success"}', "application/json"
+        elif "qqtok" in self.path or "getAppAccessToken" in self.path:
+            out, ctype = b'{"access_token":"FAKE_TOKEN","expires_in":7200}', "application/json"
+        elif "qqmsg" in self.path:
+            out, ctype = b'{"id":"MSG1","timestamp":1}', "application/json"
         elif self.command == "GET":
             out, ctype = b"", "text/plain"
         else:
             out, ctype = b'{"errcode":0,"errmsg":"ok"}', "application/json"
-        self.send_response(200)
+        self.send_response(204 if "discord" in self.path else 200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(out)))
         self.end_headers()
@@ -182,6 +186,62 @@ class TestChannels(unittest.TestCase):
         for k in ("wecom_bot", "generic", "ntfy", "bark"):
             self.assertEqual(r.get(k), "ok", f"{k} 应成功：{r}")
         self.assertEqual(len(GOT), 4)
+
+    # ─────────────────────────── 新增：钉钉 ───────────────────────────
+    def test_钉钉_payload形状(self):
+        self.h.CFG["channels"] = {"dingtalk_webhook": self.url + "/dt"}
+        r = self.h.channel_send("开会了")
+        self.assertEqual(r.get("dingtalk"), "ok", r)
+        rec = [g for g in GOT if "/dt" in g["path"]][0]
+        msg = json.loads(rec["body"])
+        self.assertEqual(msg["msgtype"], "text")
+        self.assertEqual(msg["text"]["content"], "开会了")
+
+    def test_钉钉_加签时URL带timestamp与sign(self):
+        self.h.CFG["channels"] = {"dingtalk_webhook": self.url + "/dt", "dingtalk_secret": "SECabc"}
+        self.h.channel_send("x")
+        rec = [g for g in GOT if "/dt" in g["path"]][0]
+        self.assertIn("timestamp=", rec["path"])
+        self.assertIn("sign=", rec["path"])
+
+    # ─────────────────────────── 新增：Discord ───────────────────────────
+    def test_discord_只要content字段(self):
+        self.h.CFG["channels"] = {"discord_webhook": self.url + "/discord"}
+        r = self.h.channel_send("hi discord")
+        self.assertEqual(r.get("discord"), "ok", f"204 也算成功：{r}")
+        rec = [g for g in GOT if "discord" in g["path"]][0]
+        self.assertEqual(json.loads(rec["body"]), {"content": "hi discord"})
+
+    # ─────────────────────────── 新增：QQ 官方 ───────────────────────────
+    def test_qq_官方_取token再发私聊(self):
+        self.h.CFG["channels"] = {
+            "qq_appid": "102000", "qq_secret": "sec",
+            "qq_target": "OPENID123", "qq_kind": "user",
+            "qq_token_url": self.url + "/qqtok",
+            "qq_api_base": self.url + "/qqmsg",
+        }
+        r = self.h.channel_send("QQ 上收到没")
+        self.assertEqual(r.get("qq"), "ok", r)
+        tok = [g for g in GOT if "qqtok" in g["path"] or "getAppAccessToken" in g["path"]]
+        msg = [g for g in GOT if "qqmsg" in g["path"]]
+        self.assertTrue(tok, "应先取 access_token")
+        self.assertTrue(msg, "再发消息")
+        self.assertIn("/v2/users/OPENID123/messages", msg[0]["path"])
+        self.assertEqual(json.loads(msg[0]["body"])["content"], "QQ 上收到没")
+        self.assertIn("QQBot ", msg[0]["headers"].get("Authorization", ""))
+
+    def test_qq_群聊用group路径(self):
+        self.h.CFG["channels"] = {
+            "qq_appid": "1", "qq_secret": "s", "qq_target": "G999", "qq_kind": "group",
+            "qq_token_url": self.url + "/qqtok", "qq_api_base": self.url + "/qqmsg",
+        }
+        self.h.channel_send("群里发")
+        msg = [g for g in GOT if "qqmsg" in g["path"]][0]
+        self.assertIn("/v2/groups/G999/messages", msg["path"])
+
+    def test_qq_缺Secret时不发只报空(self):
+        st = self.h.channels_status({"channels": {"qq_appid": "1"}})
+        self.assertIn("空", st["qq"])
 
     def test_channel_test_发的是测试文案(self):
         self.h.CFG["channels"] = {"ntfy_url": self.ntfy}
