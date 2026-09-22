@@ -68,7 +68,7 @@ except OSError:
     pass
 CFG_PATH = os.path.join(BASE, "hub.json")
 DB_PATH = os.path.join(BASE, "hub.db")
-VERSION = "0.1.17"
+VERSION = "0.1.18"
 TZ = timezone(timedelta(hours=8))          # 北京时间（用户在国内，固定 +8，避免服务器 UTC 漂移）
 
 DEFAULT_CFG = {
@@ -529,7 +529,7 @@ def db():
 # 失败也不会让中枢起不来（报出来 + `hubctl schema` 能看出落在哪一版）。
 # 硬要求：**每个迁移都必须幂等**（IF NOT EXISTS / 先查再加列）—— 老库 user_version=0
 # 但表已存在，会被当成"从头跑一遍"，不幂等就会炸。
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _MIGRATIONS = []
 
 
@@ -671,6 +671,19 @@ def _mig_002_decisions_ctx(conn):
 
 
 @migration
+def _mig_004_feedback_weight(conn):
+    """v4：feedback 加 `w`（证据强度）与 `src`（谁给的：manual / implicit）。
+
+    为什么要权重：主人亲手点的 ✓/✗ 是**强证据**（w=1.0）；
+    "她说完 30 分钟内主人有没有回话"推出来的隐式反馈是**弱证据**（w=0.4~0.6）。
+    喂给 Beta 后验时按分数计数：(1 + Σw_ok) / (2 + Σw_ok + Σw_bad)——
+    这样弱证据能推动后验、但不会压过主人亲手点的；日志里也看得出每条是谁给的。
+    """
+    _add_column(conn, "feedback", "w", "REAL DEFAULT 1.0")
+    _add_column(conn, "feedback", "src", "TEXT DEFAULT 'manual'")
+
+
+@migration
 def _mig_003_audit_and_pair(conn):
     """v3：audit（只记动作不记内容的审计）与 pair_codes（一次性配对码）。"""
     conn.executescript("""
@@ -750,7 +763,9 @@ def band_stats(min_n=4):
     out = {"global": {}, "bands": {}, "min_n": min_n}
     try:
         with db() as c:
-            rows = c.execute("SELECT band, verdict, COUNT(*) n FROM feedback GROUP BY band, verdict").fetchall()
+            # ★ 按**证据强度**加权计数（手动 w=1，隐式 0.4~0.6）——见 _mig_004
+            rows = c.execute("SELECT band, verdict, SUM(COALESCE(w, 1.0)) n "
+                             "FROM feedback GROUP BY band, verdict").fetchall()
         tot = {"ok": 0, "bad": 0}
         for r in rows:
             b = str(r["band"] or "(无桶)")
@@ -3547,7 +3562,7 @@ class Handler(BaseHTTPRequestHandler):
             lim = min(50, int((q.get("limit") or ["20"])[0] or 20))
             consume = (q.get("consume") or ["0"])[0] == "1"
             with db() as c:
-                rows = c.execute("SELECT id, ts, verdict, band, note FROM feedback "
+                rows = c.execute("SELECT id, ts, verdict, band, note, w, src FROM feedback "
                                  "WHERE consumed=0 ORDER BY id ASC LIMIT ?", (lim,)).fetchall()
                 if consume and rows:
                     c.execute("UPDATE feedback SET consumed=1 WHERE id IN (%s)"
@@ -3688,11 +3703,18 @@ class Handler(BaseHTTPRequestHandler):
             # ★ 客户端的口子只传 verdict（挂件/App 都不知道"当前场景桶"是什么）；
             #   桶由**中枢按上报时刻自己算** → 分桶 Thompson 才真能攒到样本。
             band = str(b.get("band") or "").strip()[:24] or band_now()
+            # ★ 证据强度：手动点 = 1.0；隐式推断（回话/没回话）默认 0.5
+            try:
+                w = float(b.get("w", 1.0))
+            except (TypeError, ValueError):
+                w = 1.0
+            w = max(0.05, min(1.0, w))
+            src = str(b.get("src") or "manual").strip()[:16] or "manual"
             with db() as c:
-                c.execute("INSERT INTO feedback(ts, verdict, band, note) VALUES (?,?,?,?)",
-                          (now_iso(), v, band, str(b.get("note") or "")[:200]))
-            print(f"[feedback] {v}", flush=True)
-            return self._send(200, {"ok": True, "verdict": v})
+                c.execute("INSERT INTO feedback(ts, verdict, band, note, w, src) VALUES (?,?,?,?,?,?)",
+                          (now_iso(), v, band, str(b.get("note") or "")[:200], w, src))
+            print(f"[feedback] {v} w={w} src={src} band={band}", flush=True)
+            return self._send(200, {"ok": True, "verdict": v, "band": band, "w": w, "src": src})
         if path == "/persona":
             body = self._body()
             if isinstance(body, dict) and body:

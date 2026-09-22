@@ -320,7 +320,7 @@ class Handler(BaseHTTPRequestHandler):
             lim = min(50, int((q.get("limit") or ["20"])[0] or 20))
             consume = (q.get("consume") or ["0"])[0] == "1"
             with db() as c:
-                rows = c.execute("SELECT id, ts, verdict, band, note FROM feedback "
+                rows = c.execute("SELECT id, ts, verdict, band, note, w, src FROM feedback "
                                  "WHERE consumed=0 ORDER BY id ASC LIMIT ?", (lim,)).fetchall()
                 if consume and rows:
                     c.execute("UPDATE feedback SET consumed=1 WHERE id IN (%s)"
@@ -461,11 +461,18 @@ class Handler(BaseHTTPRequestHandler):
             # ★ 客户端的口子只传 verdict（挂件/App 都不知道"当前场景桶"是什么）；
             #   桶由**中枢按上报时刻自己算** → 分桶 Thompson 才真能攒到样本。
             band = str(b.get("band") or "").strip()[:24] or band_now()
+            # ★ 证据强度：手动点 = 1.0；隐式推断（回话/没回话）默认 0.5
+            try:
+                w = float(b.get("w", 1.0))
+            except (TypeError, ValueError):
+                w = 1.0
+            w = max(0.05, min(1.0, w))
+            src = str(b.get("src") or "manual").strip()[:16] or "manual"
             with db() as c:
-                c.execute("INSERT INTO feedback(ts, verdict, band, note) VALUES (?,?,?,?)",
-                          (now_iso(), v, band, str(b.get("note") or "")[:200]))
-            print(f"[feedback] {v}", flush=True)
-            return self._send(200, {"ok": True, "verdict": v})
+                c.execute("INSERT INTO feedback(ts, verdict, band, note, w, src) VALUES (?,?,?,?,?,?)",
+                          (now_iso(), v, band, str(b.get("note") or "")[:200], w, src))
+            print(f"[feedback] {v} w={w} src={src} band={band}", flush=True)
+            return self._send(200, {"ok": True, "verdict": v, "band": band, "w": w, "src": src})
         if path == "/persona":
             body = self._body()
             if isinstance(body, dict) and body:

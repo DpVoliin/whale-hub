@@ -116,6 +116,106 @@ def hub(path, payload=None):
         return json.loads(r.read().decode() or "{}")
 
 
+
+# ─────────────────────────── 隐式反馈（弱信号）───────────────────────────
+# 为什么要有它：实测她说完话后**手动 ✓/✗ 几乎永远等不到**（日志里长期是 0✓/0✗）——
+# 于是 p_接受恒等于 Beta(1,1)=0.50，永远 < 阈值 0.67 → 只有"料≥3"才敢开口，
+# 整条自适应机制在饿着。所以补一个**弱信号**，从"她说完之后主人有没有反应"里学：
+#   ① 30 分钟内主人回话了          → 这次开口受欢迎      w=0.6
+#   ② 主人在场（前后 3 小时有动静）却一直没回 → 这次开口是打扰  w=0.4
+#   ③ 之后 3 小时都没人影（睡了/出门）        → **什么都不记**（别把"没看见"当"嫌烦"）
+# 强证据（手动点，w=1.0）永远压过弱证据（见中枢 _mig_004 的加权后验）。
+# 主人的"最后说话时间"只从**本机** Hermes 会话库只读读取，不外发；
+# 读不到就什么都不记 —— 宁可不学，也不冤枉她。
+IMPLICIT_ON = os.getenv("WHALE_IMPLICIT", "1").lower() not in ("0", "false", "no", "off")
+ATTRIB = pathlib.Path(os.getenv("WHALE_ATTRIB", "/opt/whale/.whale_attrib.json"))
+HERMES_DB = pathlib.Path(os.getenv("WHALE_HERMES_DB", os.path.expanduser("~/.hermes/state.db")))
+SILENCE_DOWN_MIN = 180          # 多久没人影就算"不在场"→ 不记负反馈
+
+
+def _last_user_ts():
+    """主人最后一次说话的时间（epoch 秒）。读不到返回 None（→ 不记任何隐式反馈）。"""
+    try:
+        import sqlite3
+        c = sqlite3.connect("file:%s?mode=ro" % HERMES_DB, uri=True)
+        r = c.execute("SELECT MAX(timestamp) FROM messages WHERE role='user'").fetchone()
+        c.close()
+        return float(r[0]) if r and r[0] is not None else None
+    except Exception:
+        return None
+
+
+def _attrib_load():
+    try:
+        return json.loads(ATTRIB.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _attrib_save(items):
+    try:
+        ATTRIB.parent.mkdir(parents=True, exist_ok=True)
+        ATTRIB.write_text(json.dumps(items[-200:], ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        _dbg("归因记录写不进去：%s" % str(e)[:60])
+
+
+_IMPL_LAST = [0.0]
+
+
+def attribute_delivery(text: str, band: str = ""):
+    """她成功说出一条 → 记一笔待结的归因窗口（之后由 implicit_tick 结账）。"""
+    if not IMPLICIT_ON:
+        return
+    items = _attrib_load()
+    items.append({"ts": time.time(), "band": band or "", "head": (text or "")[:40]})
+    _attrib_save(items)
+
+
+def implicit_tick(min_age_min: int = 60):
+    """把到点的归因窗口结掉，写成**弱反馈**发给中枢。幂等、只处理到点的那些。
+
+    返回本轮写入的条数。挂在主循环里每分钟左右跑一次。
+    """
+    if not IMPLICIT_ON:
+        return 0
+    items = _attrib_load()
+    if not items:
+        return 0
+    now = time.time()
+    last_user = _last_user_ts()
+    keep, sent = [], 0
+    for it in items:
+        age = now - float(it.get("ts") or 0)
+        if age < min_age_min * 60:
+            keep.append(it)                     # 还没到结账点
+            continue
+        if last_user is None:
+            keep.append(it)                     # 读不到主人的动静 → 留着，别乱判
+            continue
+        t0 = float(it["ts"])
+        replied = t0 <= last_user <= t0 + 30 * 60
+        if replied:
+            v, w, note = "good", 0.6, "隐式：30 分钟内主人回话了"
+        elif last_user >= t0 - SILENCE_DOWN_MIN * 60:
+            v, w, note = "bad", 0.4, "隐式：主人在场但一直没回"
+        else:
+            v, w, note = None, 0, "主人当时不在场（不记）"
+        if v:
+            try:
+                hub("/feedback", {"verdict": v, "band": it.get("band") or "",
+                                  "w": w, "src": "implicit", "note": note})
+                sent += 1
+                _dbg("隐式反馈 %s(w=%.1f) ← %s" % (v, w, note))
+            except Exception as e:
+                _dbg("隐式反馈发不出去：%s" % str(e)[:60])
+                keep.append(it)
+                continue
+        # 结过账的不再保留
+    _attrib_save(keep)
+    return sent
+
+
 def deliver(text: str):
     """经网关 webhook 直投微信。"""
     body = json.dumps({"text": text}, ensure_ascii=False).encode()
@@ -127,7 +227,11 @@ def deliver(text: str):
     req.add_header("X-Webhook-Signature-V2", sig)
     with urllib.request.urlopen(req, timeout=20) as r:
         out = r.read().decode(errors="replace")
-    return r.status == 200 and '"delivered"' in out, out[:200]
+    ok = r.status == 200 and '"delivered"' in out
+    if ok:
+        # ★ 投递成功 → 记一笔归因窗口，稍后由 implicit_tick 用"主人有没有反应"结账
+        attribute_delivery(text)
+    return ok, out[:200]
 
 
 def llm(messages, timeout=25, max_tokens=200, temperature=1.05):
@@ -929,6 +1033,12 @@ def main():
             _fb += 1
             if _fb % 15 == 0:                 # 约 30 秒取一次反馈（不必每 2 秒问）
                 consume_feedback()
+                if time.time() - _IMPL_LAST[0] > 60:
+                    _IMPL_LAST[0] = time.time()
+                    try:
+                        implicit_tick()
+                    except Exception as e:
+                        _dbg("implicit_tick 出错：%s" % str(e)[:60])
             if not relay_urgent():
                 maybe_speak()
                 time.sleep(POLL)
