@@ -37,8 +37,11 @@ Changelog = "https://github.com/DpVoliin/whalecare/blob/main/CHANGELOG.md"
 whalecare = "whalecare.__main__:main"
 
 [tool.setuptools]
-# 单文件分发是主线：这里只把合并产物 hub.py 装成可执行模块
-py-modules = []
+# 单文件分发是主线；这里只装 **一个薄壳包**（whalecare/），它的 __main__ 把 hub.py 当程序跑。
+# hub.py 不进 git 的 whalecare/ 目录 —— 由发布流程在打包前 `cp hub/hub.py whalecare/hub.py`，
+# 这样"单文件"始终只有一个真相，不会出现两份互相漂移的副本。
+packages = ["whalecare"]
+package-data = { whalecare = ["hub.py"] }
 
 [tool.ruff]
 line-length = 120

@@ -1,0 +1,144 @@
+# Whalecare (鲸鲸) — a self-hosted companion that actually lives on your data
+
+**English** · [中文](README.md)
+
+[![ci](https://github.com/DpVoliin/whalecare/actions/workflows/ci.yml/badge.svg)](https://github.com/DpVoliin/whalecare/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![python 3.11+](https://img.shields.io/badge/python-3.11%2B-informational.svg)](pyproject.toml)
+[![zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](pyproject.toml)
+
+Whalecare is a **proactive** personal agent: it watches the data you already generate
+(phone screen time, sleep, schedule, PC activity, orders, battery…), keeps it in **your own
+SQLite database**, and decides *by itself* when a message is actually worth sending.
+
+It is not a chatbot waiting for you to type. It is the thing that taps you on the shoulder —
+and knows when not to.
+
+> Most docs are currently in Chinese (the project's primary language). This file is the
+> English entry point; the Chinese `README.md` is the fuller one.
+> Translations are welcome — see [`docs/COMMUNITY.md`](docs/COMMUNITY.md).
+
+---
+
+## 30 seconds: what it looks like
+
+A real message it sent (translated):
+
+> 🐋 *(has been watching all day)* You've been at the screen for 9 hours — go stretch. By the way,
+> it'll rain tomorrow morning, 88%. And you have class at 8.
+
+And the reason it decided to speak **right then** is logged, not guessed:
+
+```
+next gap 20 min  (daytime | rain today | social 30 min | 3 classes | parcel pending |
+                  disk 1.1% free | screen 554 min | 1 anomaly vs own baseline |
+                  rich material(8) → speak sooner | you just picked up the phone | said 5 today)
+```
+
+That line is the whole point of the project: **the timing is computed, not random.**
+
+---
+
+## Five design tradeoffs (they decide whether it's pleasant or annoying)
+
+1. **Relative to *your* baseline, not an absolute threshold.** "6 hours of screen time" is
+   normal for one person and a lot for another. All anomaly detection is median + MAD against
+   your own history, with small-sample shrinkage so it stays quiet when it isn't sure yet.
+2. **Silence is acceptable; being wrong is costly.** The system is tuned to under-speak:
+   a utility gate (`p(accept) > cost_false / (cost_false + cost_miss)`) plus a daily cap that
+   adapts to your ✓/✗ feedback.
+3. **Nothing that can't run on your machine.** Runtime is **zero third-party dependencies** —
+   pure Python standard library. The whole backend ships as one readable file you can audit.
+4. **De-identify before the model sees anything.** `/llm-preview` shows you exactly what the
+   model would receive (categories and coarse numbers), and what was stripped.
+5. **Don't let it claim what it can't do.** It never pretends to perform physical actions
+   ("dimming the lights"), and the text it speaks never contains stage directions.
+
+---
+
+## Architecture
+
+```
+collector (Android)          hub.py (your machine)          speaker               outputs
+────────────────────         ─────────────────────          ───────               ───────
+screen / sleep / health      SQLite  +  de-identification    4 research-backed     WeChat
+calendar / music / orders →  rules   +  statistics       →  algorithms        →   desktop
+battery / Bluetooth      →   reminders +  delivery queue      + Thompson           small screens
+   HTTPS + cert pinning      (one file, zero deps)            bandits              (voice module)
+```
+
+Everything except the phone lives on a machine you control. The phone talks to *your* hub
+over HTTPS with certificate pinning; the hub needs no account, no cloud, no telemetry.
+
+---
+
+## Quick start
+
+```bash
+git clone https://github.com/DpVoliin/whalecare && cd whalecare
+python3 hub/hub.py            # starts on :11440, prints a masked token, creates hub.json + hub.db
+```
+
+Then open `http://127.0.0.1:11440/llm-preview` — that's what the model would see, and
+`/health` for status. Install the Android collector and point it at your hub
+(see [`docs/DEPLOY-GUIDE.md`](docs/DEPLOY-GUIDE.md), Chinese).
+
+Prefer a container? `docker compose up -d` (data stays in `./data`).
+Prefer pip? `pip install whalecare && whalecare` — same single-file hub, just wrapped.
+
+Optional pieces: `hubctl.py` (CLI: status/stats/dump/restore/doctor/token/…),
+`speaker/` (the "decides when to talk" layer, needs an LLM API key),
+`desktop/` (Windows widget), `mcu/` (LAN relay for microcontrollers).
+
+---
+
+## How the timing works (the interesting part)
+
+It isn't a cron job with random delays. The speaker layer applies published research:
+
+| Mechanism | What it does | Source |
+|---|---|---|
+| **Interruptibility / breakpoint delivery** | speak when you just picked up the phone, not mid-focus | Iqbal & Bailey, CHI 2007 |
+| **Goldilocks time windows** | every topic has hours where it's useful; outside them, don't send | arXiv:2504.09332 |
+| **Expected-utility gate** | act only if `p(accept)` beats the false-positive cost | Horvitz, CHI 1999 |
+| **Bucketed Thompson sampling** | learn your acceptance per context band (morning/weekend…), requiring ≥4 samples per band before trusting it | arXiv:2608.04416 |
+| **Interruption dashboard** | `hubctl interruption` → open rate, accept rate, hour histogram, last reasons | "interruption budget" literature |
+
+Plus a "rich material" score: weather, upcoming class, low disk, low battery, unusual-relative-to-you
+signals raise the score → speak sooner; nothing worth saying → back off (5–90 minute bounds, daily cap).
+
+---
+
+## Privacy & security (verifiable, not just claimed)
+
+- **Raw data stays on your machine.** `privacy.store_raw_text` defaults to `false`;
+  health notification text is not persisted.
+- **What enters the model is a whitelist.** Coordinates, app names, titles, addresses and
+  message bodies are stripped before `llm_context()`. `GET /llm-preview` lets you check.
+- **GDPR-style endpoints built in:** `GET /export` (portability) and `POST /erase?confirm=…`
+  (deletion, with an automatic backup first).
+- **Auth:** header-only `X-Token` (query tokens rejected), 1 MB body cap, rate limiting per source.
+- **Transport:** HTTPS with a self-signed cert you generate on your own machine; the Android
+  collector pins it and encrypts its offline queue with the Keystore.
+- **Search results are gated** (trusted domains only, harmful-word filter, always ≥2 corroborating
+  results before she says anything about the outside world).
+
+Security scanners, dependency updates, SBOM generation and OpenSSF Scorecard run in CI.
+The repository contains **no third-party art assets** (see `desktop/assets/README.md`).
+
+---
+
+## Contributing
+
+You don't need to understand the whole system to help. [`docs/COMMUNITY.md`](docs/COMMUNITY.md)
+lists tasks with **evidence and acceptance criteria** (reproducible builds, auto-generated API
+lists, English strings, doc translations, more delivery channels…), plus the versioning policy
+and when 1.0 happens.
+
+The one project-specific rule: the backend is **fragment sources → amalgamated single file**
+(`hub/src/whalecare/*.py` → `hub/hub.py`), and CI enforces byte-for-byte equality —
+so **change a fragment and the product together** (see [`CONTRIBUTING.md`](CONTRIBUTING.md)).
+
+## License
+
+MIT. Your data is yours; the code is here to be audited.

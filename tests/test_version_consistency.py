@@ -73,6 +73,15 @@ class VersionConsistencyTest(unittest.TestCase):
         pv = re.search(r'^VERSION = "([\d.]+)"', prod, re.M).group(1)
         self.assertEqual(fv, pv, "片段与产物的 VERSION 不一致 → 忘了跑 build_single.py 并提交")
 
+    def test_package_shell_version_matches(self):
+        """pip 包壳（whalecare/__init__.py）的版本也要跟上 CHANGELOG。"""
+        p = ROOT / "whalecare" / "__init__.py"
+        if not p.is_file():
+            self.skipTest("没有包壳")
+        m = re.search(r'^__version__ = "([\d.]+)"', p.read_text(encoding="utf-8"), re.M)
+        self.assertIsNotNone(m, "包壳里找不到 __version__")
+        self.assertEqual(m.group(1), self.v, "whalecare/__init__.py 的版本落后了")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

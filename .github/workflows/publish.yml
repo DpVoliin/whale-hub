@@ -1,0 +1,71 @@
+# 发布到 PyPI（用 Trusted Publishing，**不需要在仓库里存任何 API token**）
+#
+# 前置（只需做一次，在 PyPI 网页上点）：
+#   1) 注册/登录 https://pypi.org
+#   2) 打开 https://pypi.org/manage/account/publishing/ → 填这张表：
+#        PyPI Project Name : whalecare
+#        Owner             : DpVoliin
+#        Repository name   : whalecare
+#        Workflow name     : publish.yml
+#        Environment name  : pypi
+#   3) 仓库 Settings → Environments → 新建一个叫 pypi 的（可留空，只是给上面匹配用）
+#
+# 之后：在 GitHub 上发一个 Release（或手动点 Run workflow）→ 这个流程会把 sdist + wheel 推上 PyPI。
+name: publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}        # 也允许手动触发（首次可以先 dry-run）
+
+permissions:
+  contents: read
+  id-token: write              # ★ Trusted Publishing 靠它换临时令牌，别删
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ① 一致性：版本号五处必须一致（与 tests/test_version_consistency.py 同一套规矩）
+      - name: 版本一致性
+        run: python3 -m unittest tests.test_version_consistency -v
+
+      # ② 单文件产物必须先是最新的（片段改了却没合并 = 打包了过期的逻辑）
+      - name: 合并产物与片段等价
+        run: |
+          python3 hub/tools/build_single.py
+          cmp hub/dist/hub.py hub/hub.py
+
+      # ③ ★ 关键一步：把"唯一真相" hub/hub.py 拷进包壳
+      #    这样 wheel 里带的是单文件本体，而仓库里不会出现第二份可能漂移的副本。
+      - name: 把单文件中枢拷进包壳
+        run: cp hub/hub.py whalecare/hub.py
+
+      - name: 构建 sdist + wheel
+        run: |
+          python3 -m pip install --upgrade build
+          python3 -m build
+
+      # ④ 自检：包必须零依赖、且带得动 hub.py（否则装完跑不起来）
+      - name: 自检 wheel 内容
+        run: |
+          python3 - <<'PY'
+          import glob, zipfile
+          whl = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(whl).namelist()
+          assert any(n.endswith("whalecare/hub.py") for n in names), "wheel 里没有 hub.py"
+          meta = [n for n in names if n.endswith("METADATA")][0]
+          text = zipfile.ZipFile(whl).read(meta).decode()
+          assert "Requires-Dist:" not in text, "声明了依赖 —— 本项目运行时零依赖"
+          print(f"  ✓ {whl} · 含 hub.py · 零依赖")
+          PY
+
+      - name: 发布到 PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

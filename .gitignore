@@ -45,3 +45,5 @@ Thumbs.db
 desktop/build/
 desktop/dist/
 desktop/*.spec
+# 打包前从 hub/hub.py 拷进来的副本（单文件只有一个真相，这份不入库）
+whalecare/hub.py

@@ -1,4 +1,29 @@
-[中文](README.md) · **English**
+Metadata-Version: 2.4
+Name: whalecare
+Version: 0.1.19
+Summary: 鲸鲸 · 自托管的个人数据中枢：常驻、能读你自己的数据、能主动关心
+Author: DpVoliin
+License: MIT
+Project-URL: Homepage, https://github.com/DpVoliin/whalecare
+Project-URL: Repository, https://github.com/DpVoliin/whalecare
+Project-URL: Issues, https://github.com/DpVoliin/whalecare/issues
+Project-URL: Changelog, https://github.com/DpVoliin/whalecare/blob/main/CHANGELOG.md
+Keywords: self-hosted,local-first,privacy,personal-data,quantified-self,proactive
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Console
+Classifier: Intended Audience :: End Users/Desktop
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: POSIX :: Linux
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Home Automation
+Classifier: Topic :: Internet :: WWW/HTTP :: HTTP Servers
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Dynamic: license-file
 
 # whalecare · 鲸鲸
 

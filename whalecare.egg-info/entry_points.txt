@@ -1,0 +1,2 @@
+[console_scripts]
+whalecare = whalecare.__main__:main
