@@ -534,5 +534,34 @@ class CategoryAndOutputsTest(unittest.TestCase):
             self.assertIsInstance(r, dict, f"{kind} 复盘应返回 dict")
 
 
+
+    def test_varying_extra_meta_field_still_takes_latest(self):
+        """★ 回归：meta 混进"每次都变"的字段时，行为必须**确定**。
+
+        实测（同数据下对比新旧 SQL）：
+          · 旧实现按 `day, meta` 分组 → 同一 App 一天**被拆成 2 组**（分组明确是错的）；
+            最终取值靠 Python 循环"最后写入者胜"，即依赖 SQLite 一条**没有文档保证**的返回顺序
+            —— 这次碰巧取到正确的 20，但这是**行为不确定**，不是"现在就算错"。
+          · 新实现按 `day, pkg|app` 分组 → 1 组，取值由 `ORDER BY ts DESC` 确定 → 永远取最新。
+
+        所以这条测的是"结果确定"，不是"某个具体 bug 已复现"（不夸大）。"""
+        import sqlite3 as _s
+        with self.h.db() as c:
+            c.execute("DELETE FROM metrics WHERE device='vary_probe'")
+            # ★ 故意让**插入顺序与时间顺序相反**：先插 ts 较晚、值 20 的那条。
+            #   旧实现按行序返回，最后一条是 10 → 会取错；修好后按 ts 取 → 20。
+            for seq, val in (("2", 20), ("1", 10)):
+                c.execute("INSERT INTO metrics(ts,day,device,metric,value,unit,meta) "
+                          "VALUES (?,?,?,?,?,'',?)",
+                          (f"{_days_ago(0)}T1{seq}:00:00+08:00", _days_ago(0), "vary_probe",
+                           "app.usage_minutes", val,
+                           json.dumps({"app": "哔哩哔哩", "pkg": "com.vary.bili",
+                                       "seq": seq, "extra": "每秒都变" + seq})))
+            c.commit()
+            s = self.h._cat_day_series(c, days=7)
+        lab = self.h.cat_app("哔哩哔哩")
+        self.assertGreaterEqual(s[lab].get(_days_ago(0), 0), 20.0,
+                                "meta 有变化字段时也必须取当天最新（20），不能退化成取到 10")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

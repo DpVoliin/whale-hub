@@ -64,7 +64,13 @@ def _cat_day_series(c, days=21):
         rows = c.execute(
             "SELECT day, ts, value, meta FROM ("
             "  SELECT day, ts, value, meta,"
-            "         ROW_NUMBER() OVER (PARTITION BY day, meta ORDER BY ts DESC) rn"
+            # ★ 分组键必须与下面循环用的**同一个键**（pkg/app）。
+            #   原来按 meta 整串 JSON 分组：meta 里只要混进任何"每次都变"的字段
+            #   （时间戳/标题/序号…），分组就散 → 同一 App 返回多行 →
+            #   聚合静默退化成"取 SQL 返回顺序里最后那条"（不保证是最新的）。
+            "         ROW_NUMBER() OVER (PARTITION BY day,"
+            "             COALESCE(json_extract(meta,'$.pkg'), json_extract(meta,'$.app'), '?')"
+            "           ORDER BY ts DESC) rn"
             "  FROM metrics WHERE day>=? AND metric='app.usage_minutes'"
             ") WHERE rn=1", (d0,)).fetchall()
     except Exception:
