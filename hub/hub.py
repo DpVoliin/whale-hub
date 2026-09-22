@@ -3882,7 +3882,7 @@ class Handler(BaseHTTPRequestHandler):
                 "rules": {"class_remind_minutes": _r.get("class_remind_minutes"),
                           "sit_continuous_minutes": _r.get("sit_continuous_minutes")},
                 "uptime_note": "hub 在跑", "endpoints": ["/ingest", "/today", "/pending", "/persona",
-                                                         "/devices", "/metrics", "/ack", "/chat", "/health"]}
+                                                         "/devices", "/metrics", "/ack", "/chat", "/health", "/mcu/inbox", "/mcu/ack", "/export", "/erase", "/bands", "/decisions", "/api/mcu"]}
 
     def _ingest(self, body):
         ok, skipped = ingest_items(body)

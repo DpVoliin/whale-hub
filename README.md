@@ -329,6 +329,9 @@ HTTP: GET /mcu?d=stm32_room&m=temp,hum&v=26.4,58&u=C   → 回 "ok"
 
 完整协议、ESP-01/ESP8266 AT 示例、安全建议见 [`docs/MCU.md`](docs/MCU.md)。
 
+> 硬件方向（STM32 小屏/音箱）**已评估、短期不做**：接口可行（约 90 元 + 内网中继），结论见 CHANGELOG v0.1.19。
+
+
 ## 隐私与安全
 
 - **原始数据只留在你自己的服务器**（SQLite，随时 `hubctl sql` 看）

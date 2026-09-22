@@ -156,6 +156,20 @@ GET https://<中枢>:11443/api/pair?c=4J6K-6SVP&d=stm32_room
   取指纹：`openssl x509 -in hub.crt -noout -fingerprint -sha256`（去掉冒号、小写）。
 - 没给 CA 又没显式 `WHALE_INSECURE=1` → **拒绝启动**（不给"默默降级成不校验"的机会）。
 
+## 下行：让设备能收到她的话（提醒 / 简报）
+
+同一套协议反着走一遍 —— 设备主动来取，一行纯文本，单片机不用解析 JSON：
+
+```
+GET /mcu/inbox?d=stm32_room&t=<设备token>&enc=gb2312   → ok|42|该睡了 主人   /   none   /   err:token
+GET /mcu/ack?d=stm32_room&t=<设备token>&id=42          → ok                 ← 念完回执（可选）
+```
+
+- `enc=gb2312` = 给 SYN6288 / XFS5152 这类中文 TTS 模块**直接可用**（默认 utf8）
+- `peek=1` = 只看不消费（调试）
+- 下发前中枢会把 `（动作）` 标注、emoji、markdown 剥掉，超 120 字按句号截断
+- **配一块屏 + 语音模块的完整做法**（接线/参考代码/模拟器）见 [`STM32.md`](STM32.md)
+
 ## 安全建议（重要）
 
 1. **别把中继的 8088/8089 暴露到公网** —— 它是明文口，只该在内网/VPN 里
