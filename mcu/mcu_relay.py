@@ -18,7 +18,9 @@
 安全（v2 起）：
   · **强制 HTTPS + 证书固定**：只信任 WHALE_CA 这一张证书，**不叠加系统根 CA**
     （旧写法用 create_default_context 会顺手加载系统信任链 → 公共 CA 理论上能伪造，那不算固定）。
-  · 可选 `WHALE_PIN=<sha256 指纹>`：握手后逐字节比对服务器证书，防"CA 被换掉"。
+  · 可选 `WHALE_PIN=<sha256 指纹>`（**可逗号分隔多个**，另可用 `WHALE_PIN_NEXT` 放新指纹）：
+  握手后逐字节比对服务器证书，防"CA 被换掉"。**轮换做法**：先把新证书指纹放进
+  `WHALE_PIN_NEXT` → 换服务器证书 → 确认握手正常 → 再把 `WHALE_PIN` 换成新指纹并清掉 NEXT。
   · **一次性配对码**：不长期存明文口令；用码换一次 token 后，码立即作废。
 
 设备怎么发（任选其一）：
@@ -47,7 +49,20 @@ MAX_PER_MIN = 600                       # 中继自身的软限流，防设备�
 QUEUE = pathlib.Path(os.getenv("WHALE_QUEUE", "/tmp/mcu_relay_queue.jsonl"))   # ⑤ 失败落盘，稍后重发
 
 CA = os.getenv("WHALE_CA", "")          # 中枢自签证书路径（必填，除非中枢本身是 http）
-PIN = (os.getenv("WHALE_PIN", "") or "").strip().lower().replace(":", "")
+def _pins(*names):
+    """把若干个环境变量里的指纹摊平成集合（支持逗号/空格/冒号分隔）。"""
+    out = []
+    for n in names:
+        for piece in (os.getenv(n, "") or "").replace(",", " ").split():
+            p = piece.strip().lower().replace(":", "")
+            if p:
+                out.append(p)
+    return out
+
+
+# ★ 多指纹 = 轮换窗口（外部评审 3.1-2）：换证书期间新旧指纹并存，避免"证书一换全量失联"
+PINS = _pins("WHALE_PIN", "WHALE_PIN_NEXT")
+PIN = PINS[0] if PINS else ""      # 兼容旧变量（打印/自检里还在用）
 INSECURE = os.getenv("WHALE_INSECURE", "") == "1"
 
 
@@ -119,11 +134,12 @@ def _get(url: str, timeout: int = 12, with_token: bool = True):
         conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=timeout)
     try:
         conn.connect()
-        if PIN and u.scheme == "https" and conn.sock is not None:
+        if PINS and u.scheme == "https" and conn.sock is not None:
             der = conn.sock.getpeercert(binary_form=True) or b""
             got = hashlib.sha256(der).hexdigest()
-            if got != PIN:
-                raise ssl.SSLError("证书指纹不符（疑似中间人）—— 拿到 %s…，期望 %s…" % (got[:16], PIN[:16]))
+            if got not in PINS:
+                raise ssl.SSLError("证书指纹不符（疑似中间人）—— 拿到 %s…，可接受的是 %s…"
+                                   % (got[:16], "/".join(p[:12] for p in PINS)))
         conn.request("GET", path, headers=headers)
         r = conn.getresponse()
         return r.status, r.read(200).decode("utf-8", "replace").strip()

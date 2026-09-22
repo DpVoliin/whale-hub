@@ -68,7 +68,7 @@ except OSError:
     pass
 CFG_PATH = os.path.join(BASE, "hub.json")
 DB_PATH = os.path.join(BASE, "hub.db")
-VERSION = "0.1.22"
+VERSION = "0.1.23"
 TZ = timezone(timedelta(hours=8))          # 北京时间（用户在国内，固定 +8，避免服务器 UTC 漂移）
 
 DEFAULT_CFG = {
@@ -536,7 +536,7 @@ def db():
 # 失败也不会让中枢起不来（报出来 + `hubctl schema` 能看出落在哪一版）。
 # 硬要求：**每个迁移都必须幂等**（IF NOT EXISTS / 先查再加列）—— 老库 user_version=0
 # 但表已存在，会被当成"从头跑一遍"，不幂等就会炸。
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 _MIGRATIONS = []
 
 
@@ -893,14 +893,23 @@ def pair_claim(code, device, actor=""):
     device = str(device or "").strip()
     if not code or not device:
         return False, {"err": "params"}
+    # ★ 抗枚举：先看这个来源是不是已经被锁（5 次失败 / 10 分钟 → 锁 15 分钟）
+    ok_t, wait = auth_throttle_check(actor or device)
+    if not ok_t:
+        audit("pair_claim", target=device[:60], actor=actor, result="denied",
+              note="触发限流，还剩 %d 秒" % wait)
+        return False, {"err": "locked", "wait": wait}
     now = datetime.now(TZ)
     try:
         with db() as c:
             row = c.execute("SELECT * FROM pair_codes WHERE code=?", (code,)).fetchone()
             if not row:
-                audit("pair_claim", target=device[:60], actor=actor, result="denied", note="码不存在")
+                lock = auth_throttle_fail(actor or device)
+                audit("pair_claim", target=device[:60], actor=actor, result="denied",
+                      note="码不存在" + ("（已锁定 %d 秒）" % lock if lock else ""))
                 return False, {"err": "badcode"}
             if row["used_at"]:
+                auth_throttle_fail(actor or device)
                 audit("pair_claim", target=device[:60], actor=actor, result="denied", note="码已被用过")
                 return False, {"err": "used"}
             try:
@@ -979,6 +988,147 @@ def audit_verify():
     return {"ok": broken is None, "checked": checked, "skipped_legacy": skipped,
             "broken_at": broken,
             "note": "链完整" if broken is None else "第 %s 条起被改过" % broken}
+
+
+@migration
+def _mig_006_throttle_and_consent(conn):
+    """① 鉴权失败限流表（外部评审 3.5-1 的"抗枚举"）② 显式同意表（PIPL 单独同意）。
+
+    为什么要落表而不是只写在文档里：限流要跨进程/跨重启生效；同意要有**可举证的记录**
+    （谁、什么时候、同意了什么、条款版本），否则"用户同意了"只是一句话。
+    """
+    conn.execute("""CREATE TABLE IF NOT EXISTS auth_fails(
+        actor TEXT PRIMARY KEY,          -- 来源（IP 或设备名），只用于限流，不当身份
+        fails INTEGER DEFAULT 0,
+        first_ts TEXT,                   -- 本计数窗口的起点
+        locked_until TEXT                -- 锁定到期时刻（ISO）
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS consents(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        what TEXT NOT NULL,              -- 例如 health（敏感健康数据）
+        granted INTEGER NOT NULL,        -- 1=同意 0=撤回
+        at TEXT NOT NULL,
+        source TEXT DEFAULT '',          -- 谁给的（设备名/IP）
+        version TEXT DEFAULT '',         -- 同意的条款版本（改条款要重新征求）
+        note TEXT DEFAULT ''
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_consents_what ON consents(what, id)")
+
+
+AUTH_LIMIT = 5            # 窗口内允许的失败次数
+AUTH_WINDOW = 600         # 计数窗口（秒）
+AUTH_LOCK = 900           # 超限后锁多久（秒）
+
+
+def _now():
+    return datetime.now(TZ)
+
+
+def auth_throttle_check(actor, limit=AUTH_LIMIT) -> tuple:
+    """查是否被锁。返回 (ok, 剩余秒数)。只看"这个人"的失败，不牵连别人。"""
+    import datetime as _dt
+    actor = str(actor or "?").strip()[:64] or "?"
+    try:
+        with db() as c:
+            row = c.execute("SELECT * FROM auth_fails WHERE actor=?", (actor,)).fetchone()
+        if not row:
+            return True, 0
+        until = row["locked_until"] or ""
+        if until:
+            try:
+                left = (_dt.datetime.fromisoformat(until) - _now()).total_seconds()
+            except Exception:
+                left = 0
+            if left > 0:
+                return False, int(left)
+        # 窗口过期 → 视为干净（下次失败会重开窗口）
+        first = row["first_ts"] or ""
+        try:
+            if first and (_now() - _dt.datetime.fromisoformat(first)).total_seconds() > AUTH_WINDOW:
+                return True, 0
+        except Exception:
+            pass
+        return (row["fails"] or 0) < limit, 0
+    except Exception:
+        return True, 0          # 限流自己坏了不能挡住正常请求
+
+
+def auth_throttle_fail(actor, limit=AUTH_LIMIT, window=AUTH_WINDOW, lock=AUTH_LOCK) -> int:
+    """记一次失败；返回本次触发的锁定时长（0=没锁）。"""
+    import datetime as _dt
+    actor = str(actor or "?").strip()[:64] or "?"
+    with db() as c:
+        row = c.execute("SELECT * FROM auth_fails WHERE actor=?", (actor,)).fetchone()
+        now = _now()
+        # ★ 锁定期内继续失败：**保持锁定**，绝不覆盖 locked_until。
+        #   （2026-09-22 被自己的测试抓到：原来会把锁清空 → 越试越早解锁 ✗）
+        if row and (row["locked_until"] or ""):
+            try:
+                left = (_dt.datetime.fromisoformat(row["locked_until"]) - now).total_seconds()
+            except Exception:
+                left = 0
+            if left > 0:
+                return int(left)
+        if not row or not row["first_ts"] or \
+                (now - _dt.datetime.fromisoformat(row["first_ts"])).total_seconds() > window:
+            c.execute("INSERT OR REPLACE INTO auth_fails(actor, fails, first_ts, locked_until) "
+                      "VALUES (?,?,?,?)", (actor, 1, now.isoformat(timespec="seconds"), ""))
+            return 0
+        fails = int(row["fails"] or 0) + 1
+        until = ""
+        if fails >= limit:
+            until = (now + _dt.timedelta(seconds=lock)).isoformat(timespec="seconds")
+            fails = 0                                     # 锁上了就把计数归零（解禁后重新数）
+        c.execute("UPDATE auth_fails SET fails=?, locked_until=? WHERE actor=?",
+                  (fails, until, actor))
+    return lock if until else 0
+
+
+def auth_throttle_ok(actor):
+    """成功一次 → 清掉失败计数（正常用户永远碰不到限流）。"""
+    try:
+        with db() as c:
+            c.execute("DELETE FROM auth_fails WHERE actor=?", (str(actor or "?").strip()[:64] or "?",))
+    except Exception:
+        pass
+
+
+def consent_granted(what: str) -> bool:
+    """当前是否有效同意（取最近一条记录：granted=1 表示现在同意着）。"""
+    what = str(what or "").strip().lower()
+    if not what:
+        return False
+    try:
+        with db() as c:
+            row = c.execute("SELECT granted FROM consents WHERE what=? ORDER BY id DESC LIMIT 1",
+                            (what,)).fetchone()
+        return bool(row and int(row["granted"] or 0) == 1)
+    except Exception:
+        return False                       # 查不到（表还没建）→ 一律当成"没同意"
+
+
+def consent_set(what: str, granted: bool, source: str = "", version: str = "", note: str = ""):
+    """记录一次同意/撤回（**只追加，不删历史** —— 要能回答"当时他同意的是什么")."""
+    with db() as c:
+        c.execute("INSERT INTO consents(what, granted, at, source, version, note) VALUES (?,?,?,?,?,?)",
+                  (str(what).strip().lower(), 1 if granted else 0,
+                   _now().isoformat(timespec="seconds"), str(source)[:64],
+                   str(version)[:32], str(note)[:120]))
+    audit("consent_set", target=str(what)[:40], actor=source,
+          result="granted" if granted else "revoked", note=str(version)[:40])
+
+
+def consent_status() -> dict:
+    """给人看的一览：每个事项当前状态 + 最近一次的时间。"""
+    out = {}
+    try:
+        with db() as c:
+            rows = c.execute("SELECT what, granted, at, version FROM consents ORDER BY id ASC").fetchall()
+        for r in rows:
+            out[r["what"]] = {"granted": bool(r["granted"]), "at": r["at"], "version": r["version"]}
+    except Exception:
+        pass
+    return out
 # ----------------------------------------------------------------- 课表 / 日程
 def _timetable():
     with db() as c:
@@ -3467,6 +3617,18 @@ def ingest_items(body):
     items = body if isinstance(body, list) else [body]
     ok = 0
     skipped = 0
+    # ★ 敏感健康数据要**显式同意**才能入库（PIPL / GDPR Art.9 单独同意）。
+    #   闸口放这里 = HTTP /ingest、单片机 /api/mcu、外挂扩展**都绕不过**。
+    no_consent = 0
+    if not consent_granted("health"):
+        _kept = []
+        for _it in items:
+            _m = str((_it or {}).get("metric") or "")
+            if _m.startswith("health.") or _m.startswith("sleep."):
+                no_consent += 1
+            else:
+                _kept.append(_it)
+        items = _kept
     with db() as c:
         # ★ P0 事件级幂等：网络重试必然导致重复投递。采集端带 event_id 时按 id 去重
         #   （比"值相同 + 60 秒窗口"更严：两个不同事件值恰好相同时不会互相吃掉）。
@@ -3540,6 +3702,13 @@ def ingest_items(body):
                 ok += 1
             except Exception as e:
                 print(f"[ingest] 跳过：{e}", flush=True)
+    if no_consent:
+        skipped += no_consent
+        try:
+            audit("ingest_no_consent", target="health", actor="ingest",
+                  result="skipped", note="无健康数据同意，丢弃 %d 条" % no_consent)
+        except Exception:
+            pass
     return ok, skipped
 
 
@@ -3731,6 +3900,19 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         path, q = u.path, parse_qs(u.query)
         # ★ 下面三条**在鉴权之前**：登录页本身不能要求已登录
+        if path == "/consent":
+            # POST {"what":"health","granted":true} → 记录**显式同意**（采集器打开健康开关时调）
+            try:
+                _b = json.loads(self._read_body() or "{}")
+            except Exception:
+                _b = {}
+            _what = str((_b or {}).get("what") or "").strip().lower()
+            if _what != "health":
+                return self._send(400, {"ok": False, "error": "只支持 what=health"})
+            consent_set(_what, bool((_b or {}).get("granted")),
+                        source=(_b or {}).get("device") or self._client(),
+                        version=(_b or {}).get("version") or "")
+            return self._send(200, {"ok": True, "what": _what, "granted": consent_granted(_what)})
         if path == "/login":
             return self._login(q)
         if path == "/logout":
@@ -4080,7 +4262,7 @@ class Handler(BaseHTTPRequestHandler):
                 "code": code_fingerprint(),
                 "rules": {"class_remind_minutes": _r.get("class_remind_minutes"),
                           "sit_continuous_minutes": _r.get("sit_continuous_minutes")},
-                "uptime_note": "hub 在跑", "endpoints": ["/ack",
+                "uptime_note": "hub 在跑", "endpoints": ["/consent", "/ack",
                                                          "/api/mcu",
                                                          "/api/pair",
                                                          "/audit",
@@ -4328,11 +4510,22 @@ class Handler(BaseHTTPRequestHandler):
     def _login_post(self):
         form = self._form()
         tok = str(form.get("token") or self.headers.get("X-Token") or "")
-        if tok != CFG["token"]:
-            audit("login", actor=self._client(), result="denied", note="口令不对")
+        who = self._client()
+        # ★ 抗枚举：先看锁（5 次错 / 10 分钟 → 锁 15 分钟），成功一次清零
+        _ok_t, _wait = auth_throttle_check(who)
+        if not _ok_t:
+            audit("login", actor=who, result="denied", note="触发限流，还剩 %d 秒" % _wait)
+            return self._send(429, login_html(CFG["persona"]["name"],
+                                              "试太多次了，请等 %d 秒后再试" % _wait),
+                              "text/html; charset=utf-8")
+        if not self._same(tok, CFG["token"]):
+            _lock = auth_throttle_fail(who)
+            audit("login", actor=who, result="denied",
+                  note="口令不对" + ("（已锁定 %d 秒）" % _lock if _lock else ""))
             return self._send(401, login_html(CFG["persona"]["name"], "口令不对，再试一次"),
                               "text/html; charset=utf-8")
-        audit("login", actor=self._client(), note="登录管理台")
+        auth_throttle_ok(who)
+        audit("login", actor=who, note="登录管理台")
         self.send_response(303)
         self.send_header("Set-Cookie",
                          "whale_admin=%s; Path=/; HttpOnly; SameSite=Strict%s"

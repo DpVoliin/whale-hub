@@ -1,10 +1,10 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:060e37b2-d063-424f-b7c0-5dcbc243073c",
+  "serialNumber": "urn:uuid:b80a21e3-6b44-4a49-aee2-4e150d9a2156",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-09-22T10:28:58Z",
+    "timestamp": "2026-09-22T11:04:12Z",
     "tools": [
       {
         "vendor": "whalecare",
@@ -14,14 +14,14 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.22",
+      "bom-ref": "pkg:generic/whalecare@0.1.23",
       "name": "whalecare",
-      "version": "0.1.22",
+      "version": "0.1.23",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "ff775ecea6fac8e586af9e4a22bb6417dfa0b21ff4022a5094c6b0cd6f7f515f"
+          "content": "107dd944524b08a1368b95d321f4e7efde9d186eae75dd2433bfb171938a0b59"
         }
       ],
       "properties": [
@@ -31,7 +31,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "b4872c7351a9599a1437931522913e89eb1e5b9f"
+          "value": "099c67f12c69227bab0dba5ffc9165d717f15a76"
         }
       ]
     }
@@ -39,14 +39,14 @@
   "components": [
     {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.22",
+      "bom-ref": "pkg:generic/whalecare@0.1.23",
       "name": "whalecare",
-      "version": "0.1.22",
+      "version": "0.1.23",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "ff775ecea6fac8e586af9e4a22bb6417dfa0b21ff4022a5094c6b0cd6f7f515f"
+          "content": "107dd944524b08a1368b95d321f4e7efde9d186eae75dd2433bfb171938a0b59"
         }
       ],
       "properties": [
@@ -56,7 +56,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "b4872c7351a9599a1437931522913e89eb1e5b9f"
+          "value": "099c67f12c69227bab0dba5ffc9165d717f15a76"
         }
       ]
     },

@@ -88,6 +88,12 @@ class PrivacyInjectionTest(unittest.TestCase):
             cls.hub.init_db()
         except Exception:
             pass
+        # ★ 健康数据要显式同意才入库（PIPL）—— 本测试验脱敏、不验同意闸，
+        #   所以入库前先给同意；否则健康数据在入库口就被丢掉（我加闸时这条就红了）。
+        try:
+            cls.hub.consent_set("health", True, source="privacy-probe", version="test")
+        except Exception:
+            pass
         # **必须走中枢真实入口**（ingest_items）：raw 剥离就发生在这一层。
         # 直接写库会绕过剥离逻辑，测出来的东西没意义。
         items = [{"device": "privacy_probe", "metric": m, "value": v, "unit": u,
@@ -99,6 +105,7 @@ class PrivacyInjectionTest(unittest.TestCase):
             print(f"  ⚠ ingest_items 抛错：{type(e).__name__} {e}")
 
     def setUp(self):
+        self._grant_health()      # ★ 健康数据现在要显式同意才入库（见新测试）
         self.ctx, self.dropped = self.hub.llm_context()
         self.blob = json.dumps(self.ctx, ensure_ascii=False)
 
@@ -119,6 +126,19 @@ class PrivacyInjectionTest(unittest.TestCase):
     def test_allowed_reductions_present(self):
         """该保留的粗粒度信息要在：分类名、金额区间这类。"""
         self.assertIn("短视频/视频", self.blob, "分类名应该保留（否则她没法说话）")
+
+    def _grant_health(self):
+        """★ 2026-09-22 起：健康数据要**显式同意**才入库（PIPL）。
+
+        这个测试集本来是验"脱敏"的，不是验"同意闸"的 —— 所以先把同意给上，
+        否则数据会在入库口被丢掉，dropped 清单自然就少了那几条
+        （我加闸时这条就红了，说明闸真的在拦）。
+        同意闸本身的行为另见 tests/test_throttle_consent.py。
+        """
+        try:
+            self.h.consent_set("health", True, source="unit-test", version="test")
+        except Exception:
+            pass
 
     def test_dropped_list_is_documented(self):
         """dropped 清单（what_model_never_sees）必须有内容，且覆盖隐私项。"""

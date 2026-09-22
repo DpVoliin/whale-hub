@@ -26,6 +26,18 @@ def ingest_items(body):
     items = body if isinstance(body, list) else [body]
     ok = 0
     skipped = 0
+    # ★ 敏感健康数据要**显式同意**才能入库（PIPL / GDPR Art.9 单独同意）。
+    #   闸口放这里 = HTTP /ingest、单片机 /api/mcu、外挂扩展**都绕不过**。
+    no_consent = 0
+    if not consent_granted("health"):
+        _kept = []
+        for _it in items:
+            _m = str((_it or {}).get("metric") or "")
+            if _m.startswith("health.") or _m.startswith("sleep."):
+                no_consent += 1
+            else:
+                _kept.append(_it)
+        items = _kept
     with db() as c:
         # ★ P0 事件级幂等：网络重试必然导致重复投递。采集端带 event_id 时按 id 去重
         #   （比"值相同 + 60 秒窗口"更严：两个不同事件值恰好相同时不会互相吃掉）。
@@ -99,6 +111,13 @@ def ingest_items(body):
                 ok += 1
             except Exception as e:
                 print(f"[ingest] 跳过：{e}", flush=True)
+    if no_consent:
+        skipped += no_consent
+        try:
+            audit("ingest_no_consent", target="health", actor="ingest",
+                  result="skipped", note="无健康数据同意，丢弃 %d 条" % no_consent)
+        except Exception:
+            pass
     return ok, skipped
 
 
@@ -290,6 +309,19 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         path, q = u.path, parse_qs(u.query)
         # ★ 下面三条**在鉴权之前**：登录页本身不能要求已登录
+        if path == "/consent":
+            # POST {"what":"health","granted":true} → 记录**显式同意**（采集器打开健康开关时调）
+            try:
+                _b = json.loads(self._read_body() or "{}")
+            except Exception:
+                _b = {}
+            _what = str((_b or {}).get("what") or "").strip().lower()
+            if _what != "health":
+                return self._send(400, {"ok": False, "error": "只支持 what=health"})
+            consent_set(_what, bool((_b or {}).get("granted")),
+                        source=(_b or {}).get("device") or self._client(),
+                        version=(_b or {}).get("version") or "")
+            return self._send(200, {"ok": True, "what": _what, "granted": consent_granted(_what)})
         if path == "/login":
             return self._login(q)
         if path == "/logout":
@@ -639,7 +671,7 @@ class Handler(BaseHTTPRequestHandler):
                 "code": code_fingerprint(),
                 "rules": {"class_remind_minutes": _r.get("class_remind_minutes"),
                           "sit_continuous_minutes": _r.get("sit_continuous_minutes")},
-                "uptime_note": "hub 在跑", "endpoints": ["/ack",
+                "uptime_note": "hub 在跑", "endpoints": ["/consent", "/ack",
                                                          "/api/mcu",
                                                          "/api/pair",
                                                          "/audit",
@@ -887,11 +919,22 @@ class Handler(BaseHTTPRequestHandler):
     def _login_post(self):
         form = self._form()
         tok = str(form.get("token") or self.headers.get("X-Token") or "")
-        if tok != CFG["token"]:
-            audit("login", actor=self._client(), result="denied", note="口令不对")
+        who = self._client()
+        # ★ 抗枚举：先看锁（5 次错 / 10 分钟 → 锁 15 分钟），成功一次清零
+        _ok_t, _wait = auth_throttle_check(who)
+        if not _ok_t:
+            audit("login", actor=who, result="denied", note="触发限流，还剩 %d 秒" % _wait)
+            return self._send(429, login_html(CFG["persona"]["name"],
+                                              "试太多次了，请等 %d 秒后再试" % _wait),
+                              "text/html; charset=utf-8")
+        if not self._same(tok, CFG["token"]):
+            _lock = auth_throttle_fail(who)
+            audit("login", actor=who, result="denied",
+                  note="口令不对" + ("（已锁定 %d 秒）" % _lock if _lock else ""))
             return self._send(401, login_html(CFG["persona"]["name"], "口令不对，再试一次"),
                               "text/html; charset=utf-8")
-        audit("login", actor=self._client(), note="登录管理台")
+        auth_throttle_ok(who)
+        audit("login", actor=who, note="登录管理台")
         self.send_response(303)
         self.send_header("Set-Cookie",
                          "whale_admin=%s; Path=/; HttpOnly; SameSite=Strict%s"

@@ -394,6 +394,19 @@ def cmd_backup(a):
     dst = f"{DB}.bak-{datetime.now(TZ).strftime('%Y%m%d-%H%M%S')}"
     shutil.copy2(DB, dst)
     print(f"  ✓ 备份：{dst}（{os.path.getsize(dst) / 1024 / 1024:.2f} MB）")
+    # ★ 生命周期：默认只留最近 7 份（备份内含全量数据，堆着既占盘又多一份泄漏面）
+    keep = int(getattr(a, "keep", 0) or os.getenv("WHALE_BACKUP_KEEP") or 7)
+    if keep > 0:
+        import glob
+        olds = sorted(glob.glob(DB + ".bak-*"), key=os.path.getmtime, reverse=True)
+        dropped = 0
+        for f in olds[keep:]:
+            try:
+                os.remove(f); dropped += 1
+            except Exception:
+                pass
+        if dropped:
+            print(f"    清理旧备份 {dropped} 份（保留最近 {keep} 份，可用 --keep N 调整）")
     if getattr(a, "encrypt", False):
         pw = getattr(a, "password", None) or os.getenv("WHALE_PASS") or input("  设置加密密码：").strip()
         if pw:
