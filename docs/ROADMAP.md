@@ -48,6 +48,12 @@
       与 API **同一套 token**（登录换 HttpOnly cookie，破坏性动作仍只在 CLI）（v0.1.13）
 - [ ] **说话策略也可外挂**：现在扩展层管数据源、人设包管人设，下一步把节奏与取舍
       （`next_gap` / `material_score`）开成可替换策略
+- [ ] **采集器工具链升级（一个任务，别再拆成 dependabot PR）**：AGP 9.x + Gradle 9 + `compileSdk 37` + Kotlin 2.4
+      一起升。起因：dependabot 把 `androidx.core-ktx 1.19.0` / `AGP 9.4.1` / `Kotlin 2.4.20` 拆成三个独立 PR，
+      但 CI 注解里的原文报错是「`androidx.core:core-ktx:1.19.0` requires **Android Gradle plugin 9.1.0 or higher**」——
+      AGP 9 又要求 Gradle 9，所以**单独合任何一个都会红**。升级时要同步三处：
+      ① CI 里钉的 `gradle-version`（现在 8.13，因为 runner 自带的 9.7.1 与 AGP 8.9.2 不兼容）
+      ② `compileSdk` ③ 真机回归一遍采集器（健康开关/通知监听那几条门禁最容易在升级后错位）
 - [ ] **macOS 采集器**：窗口切换、开机时长、前台 App 分类（契约与 `/ingest` 一致）
 - [ ] **可选 Docker 部署**：`deploy/Dockerfile` 作为附属方案（主线仍是"一个文件 + 一条命令"）
 - [ ] **CI**：推送时跑编译 + 结构断言 + 回归测试（复用仓库里已有的检查脚本）
