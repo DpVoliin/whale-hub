@@ -65,4 +65,4 @@ curl -X POST -H "X-Token: $TOKEN" -H 'Content-Type: application/json' \
 ## 迁移策略
 
 现在**没有**迁移框架：改表结构时用 `ALTER TABLE ... ADD COLUMN`（向后兼容），
-破坏性改动必须写进 `docs/adr/` 并附一段迁移脚本（计划上 `PRAGMA user_version` + 迁移链）。
+破坏性改动必须写进 `docs/adr/` 并附一个**幂等迁移函数**（已落地：`PRAGMA user_version` + `_MIGRATIONS` 有序列表，`hubctl schema` 可看落在哪一版）。
