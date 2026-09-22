@@ -9,12 +9,12 @@ curl -s -m 45 -o "$D/hub.py" "$BASE/hub.py?v=$(date +%s)" || { echo "✗ 下载 
 # ⚠️ 证书**故意不在这里下发**：TLS 私钥必须在服务器本机生成、永不外传。
 #    本脚本只保证目录存在；若还没有证书，用下面这条在服务器上生成一次：
 #    openssl req -x509 -newkey rsa:2048 -nodes -keyout /root/hub/tls/hub.key \
-#      -out /root/hub/tls/hub.crt -days 3650 -subj "/CN=whale-hub" \
+#      -out /root/hub/tls/hub.crt -days 3650 -subj "/CN=whalecare" \
 #      -addext "subjectAltName=IP:YOUR_SERVER_IP"
 if [ ! -f "$D/tls/hub.crt" ] || [ ! -f "$D/tls/hub.key" ]; then
   echo "  ⚠️ 缺证书 → 现在本机生成一张"
   openssl req -x509 -newkey rsa:2048 -nodes -keyout "$D/tls/hub.key" -out "$D/tls/hub.crt" \
-    -days 3650 -subj "/CN=whale-hub" -addext "subjectAltName=IP:YOUR_SERVER_IP" 2>/dev/null
+    -days 3650 -subj "/CN=whalecare" -addext "subjectAltName=IP:YOUR_SERVER_IP" 2>/dev/null
 fi
 chmod 600 "$D/tls/hub.key" 2>/dev/null
 

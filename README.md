@@ -1,7 +1,11 @@
-# 鲸鲸 · 让 AI 住进你的设备里
+# whalecare · 鲸鲸
 
-[![ci](https://github.com/DpVoliin/whale-hub/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
-[![android](https://github.com/DpVoliin/whale-hub/actions/workflows/android.yml/badge.svg)](../../actions/workflows/android.yml)
+**Self-hosted proactive AI companion backed by your own data** — phone / PC / MCU metrics land in
+your own SQLite, and *she* decides when it's worth speaking up (pushes to WeChat; zero third-party
+runtime dependency, local-first, auditable). 自托管 · 本地优先 · 零依赖 · 可审计。
+
+[![ci](https://github.com/DpVoliin/whalecare/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![android](https://github.com/DpVoliin/whalecare/actions/workflows/android.yml/badge.svg)](../../actions/workflows/android.yml)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -13,7 +17,7 @@
 ## 30 秒先看见效果（不用部署）
 
 ```bash
-git clone https://github.com/DpVoliin/whale-hub && cd whale-hub
+git clone https://github.com/DpVoliin/whalecare && cd whalecare
 python3 hub/hub.py &                        # 起中枢：零依赖，不需要 pip / venv
 TOKEN=$(python3 -c "import json;print(json.load(open('hub.json'))['token'])")
 curl -s -H "X-Token: $TOKEN" http://127.0.0.1:11440/llm-preview | head -40
@@ -91,7 +95,7 @@ curl -s -H "X-Token: $TOKEN" http://127.0.0.1:11440/llm-preview | head -40
 | `docs/ANDROID-RELEASE.md` | 采集器发布签名与上架准备 |
 | `desktop/` | **桌面挂件**（Windows，Python + tkinter）：透明置顶角色、表情切换、气泡说话、电脑使用时长采集。**不含美术素材**（版权原因）—— 用 `tools/make_placeholder.sh` 生成占位图，或放自己的图，见 `desktop/assets/README.md` |
 | `desktop/` | **Windows 桌面挂件 + 电脑采集**（同一个 exe，零依赖）；见 `desktop/使用说明.md` |
-| `hub/src/whalehub/` | **源码真相**：按职责切成的 13 个片段（合并顺序＝文件名前缀）|
+| `hub/src/whalecare/` | **源码真相**：按职责切成的 13 个片段（合并顺序＝文件名前缀）|
 | `hub/tools/` | `build_single.py` 合并成单文件；`split_hub.py` 迁移期切片 |
 | `hub/ext/` | **外挂扩展**：放一个 .py 就多一个数据源（契约与示例见 `docs/EXTENSIONS.md`）|
 | `tests/` | 脱敏回归测试集（换模型/改 prompt 都跑一遍）|

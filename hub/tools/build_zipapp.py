@@ -3,12 +3,12 @@
 
 为什么用 zipapp 而不是 PyInstaller / shiv / pex：
     · zipapp 是标准库自带（`python -m zipapp`），完全符合"运行时零依赖"的项目底线
-    · 产物是**一个文件**，用户 `python3 whalehub.pyz` 就能跑，不需要 venv、不需要 pip
+    · 产物是**一个文件**，用户 `python3 whalecare.pyz` 就能跑，不需要 venv、不需要 pip
     · 不含解释器（需要目标机有 Python 3.11+），体积 ~165KB —— 这正好匹配
       "自托管、给技术用户用"的定位；真要裸机双端分发再考虑 PyInstaller
 
 用法：
-    python3 hub/tools/build_zipapp.py                 # 产出 dist/whalehub.pyz
+    python3 hub/tools/build_zipapp.py                 # 产出 dist/whalecare.pyz
     python3 hub/tools/build_zipapp.py -o /tmp/x.pyz   # 指定输出
     python3 hub/tools/build_zipapp.py --run           # 打包后立刻试跑一次（冒烟）
 
@@ -29,12 +29,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 HUB_PY = ROOT / "hub" / "hub.py"
-DEFAULT_OUT = ROOT / "dist" / "whalehub.pyz"
+DEFAULT_OUT = ROOT / "dist" / "whalecare.pyz"
 
 MAIN_PY = """\
 # 入口：导入合并产物并执行 main()。
 # 注意模块名用 _app 而非 hub，避免 runpy 的「已导入再执行」警告。
-from whalehub import _app
+from whalecare import _app
 
 if __name__ == "__main__":
     _app.main()
@@ -50,9 +50,9 @@ def build(out: Path, run: bool = False) -> int:
 
     with tempfile.TemporaryDirectory() as td:
         stage = Path(td) / "app"
-        pkg = stage / "whalehub"
+        pkg = stage / "whalecare"
         pkg.mkdir(parents=True)
-        # 合并产物作为 _app 模块；whalehub/__init__.py 让它成为可导入的包
+        # 合并产物作为 _app 模块；whalecare/__init__.py 让它成为可导入的包
         shutil.copy2(HUB_PY, pkg / "_app.py")
         (pkg / "__init__.py").write_text("", encoding="utf-8")
         (stage / "__main__.py").write_text(MAIN_PY, encoding="utf-8")
@@ -86,7 +86,7 @@ def build(out: Path, run: bool = False) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="把 whale-hub 中枢打成单文件 zipapp")
+    ap = argparse.ArgumentParser(description="把 whalecare 中枢打成单文件 zipapp")
     ap.add_argument("-o", "--out", type=Path, default=DEFAULT_OUT, help="输出路径")
     ap.add_argument("--run", action="store_true", help="打包后立刻冒烟试跑")
     a = ap.parse_args()

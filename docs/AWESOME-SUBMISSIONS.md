@@ -9,12 +9,12 @@
 
 提 PR 到 `awesome-selfhosted/awesome-selfhosted-data`（新流程：改 YAML 而不是 README）。
 
-**条目（`software/whale-hub.yml` 草稿）**
+**条目（`software/whalecare.yml` 草稿）**
 
 ```yaml
-name: "whale-hub"
-website_url: "https://github.com/DpVoliin/whale-hub"
-source_code_url: "https://github.com/DpVoliin/whale-hub"
+name: "whalecare"
+website_url: "https://github.com/DpVoliin/whalecare"
+source_code_url: "https://github.com/DpVoliin/whalecare"
 description: "Personal life-data hub: an Android collector + a single-file zero-dependency Python
   server that stores your data locally, sanitizes it before any LLM sees it, and proactively
   messages you (WeChat) with the one thing worth saying. Ships a Windows desktop widget and
@@ -36,7 +36,7 @@ depends_3rdparty: false
 demo_url: ""
 ```
 
-**PR 标题**：`Add whale-hub (personal life-data hub, zero-dependency Python + Android collector)`
+**PR 标题**：`Add whalecare (personal life-data hub, zero-dependency Python + Android collector)`
 **PR 正文**：一句话说明 + 强调"zero runtime dependencies / self-hosted only / no cloud"。
 
 > ⚠️ 提交前自查：仓库要有 LICENSE ✓、能跑起来 ✓、README 有快速开始 ✓（都有了）。
@@ -76,7 +76,7 @@ python · quantified-self · self-hosted · sqlite · zero-dependencies
 
 ## 5. r/selfhosted / r/LocalLLaMA（需网络条件，读版规）
 
-**Title**: `whale-hub: I built a proactive personal assistant that lives on my own 4C4G box (zero deps, single-file Python; data never leaves home)`
+**Title**: `whalecare: I built a proactive personal assistant that lives on my own 4C4G box (zero deps, single-file Python; data never leaves home)`
 
 **Body**: 3 段 —— ① it DMs me ONE useful thing instead of dumping data ② sanitization is enforced in code, `/llm-preview` proves it ③ zero runtime deps + one-file deployment. 结尾放仓库 + license。
 

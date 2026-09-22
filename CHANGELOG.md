@@ -2,6 +2,22 @@
 
 版本号只递增**第三位**（本项目是自用系统，不做对外兼容承诺）。
 
+## v0.1.14 — 更名为 whalecare（鲸鲸）
+
+- **项目更名：`whale-hub` → `whalecare`**。理由：这套系统早就不是"一个 hub"了 ——
+  现在是**数据中枢 + 会自己判断该不该开口的伴侣**，`hub` 只描述了其中一个组件。
+  "care" 正好是它的核心行为（主动关心）。
+- 连带改动：`pyproject` 的 name/urls/script、docker service 与镜像名、SBOM vendor、
+  自签证书 CN、扩展 User-Agent、`dist/whalecare.pyz`（原 whalehub.pyz）、
+  以及 README/docs/模板里的全部引用（27 个文件）。片段目录 `hub/src/whalehub/` → `hub/src/whalecare/`。
+- **刻意不改的两处**（它们是**运行时键**，改了会直接断功能）：
+  `speaker/whale_speaker.py` 里的 `WEBHOOK_URL .../webhooks/whale-hub`（网关侧注册好的路由）
+  与 `SECRET_FILE .whale_hub_secret`（已存在的 HMAC 密钥文件）。`hubctl` 命令名同样保留
+  ——"中枢"确实仍是个数据 hub，改它要连服务器上的软链一起动。
+- 旧仓库地址 `DpVoliin/whale-hub` 由 GitHub 自动 301 跳转到新名，star / issue / 链接都不丢。
+- README 首屏补了一句**英文定位语** + GitHub topics（20 个）——中文项目在英文检索里
+  最大的短板是"没有可被搜到的英文描述"，这次一并补上。
+
 ## v0.1.13 — 审计日志 / 一次性配对码 / Web 管理台 + CI 修复
 
 ### 新增
@@ -136,8 +152,8 @@
 - **`WHALE_HOME` 环境变量**：配置与数据库的位置不再硬编码。优先级
   `$WHALE_HOME` → 旧部署（`hub.json` 就在程序旁）→ `~/.whale`。
   **升级无感**：已有实例继续用原来的路径，不打扰。
-- **单文件分发 `dist/whalehub.pyz`**：`python3 hub/tools/build_zipapp.py` 打成一个
-  ~54KB 的可执行文件，用户 `python3 whalehub.pyz` 就能跑，不需要 venv/pip。
+- **单文件分发 `dist/whalecare.pyz`**：`python3 hub/tools/build_zipapp.py` 打成一个
+  ~54KB 的可执行文件，用户 `python3 whalecare.pyz` 就能跑，不需要 venv/pip。
   **纯标准库**（标准库 zipapp），不引入 PyInstaller。
 - **零依赖护栏 `hub/tools/check_no_deps.py`**：CI 里扫描所有运行时代码的顶层 import，
   出现第三方库就让构建失败。把"零依赖"从口号变成机器守卫。

@@ -46,7 +46,7 @@
 
 ```
 hub/
-├── src/whalehub/          ← **真相**：按职责切成 13 个片段
+├── src/whalecare/          ← **真相**：按职责切成 13 个片段
 │     00_header   10_core      20_timetable  30_rules    40_privacy
 │     50_weather  60_analysis  70_care       80_persona  90_ext
 │     95_scheduler 97_http     99_main
@@ -68,7 +68,7 @@ cmp -s hub.py dist/hub.py         # 与原文件**逐字节相同**
 曾经把方法体抽成函数时留在 class 内部，后面的方法变成了它的嵌套函数（语法合法！），
 `py_compile` 照样通过，但 Handler 上少了方法、接口直接崩。
 
-**日常改代码**：改 `src/whalehub/` 里对应片段 → `build_single.py` → 部署 `hub.py`。
+**日常改代码**：改 `src/whalecare/` 里对应片段 → `build_single.py` → 部署 `hub.py`。
 新增职责就加一个片段，合并顺序就是文件名前缀顺序。
 
 ## 为什么这么分

@@ -26,7 +26,7 @@ HUB_PY = ROOT / "hub" / "hub.py"
 
 def load_hub():
     """把合并产物 hub.py 作为模块载入（不执行 main）。"""
-    spec = importlib.util.spec_from_file_location("whalehub_under_test", HUB_PY)
+    spec = importlib.util.spec_from_file_location("whalecare_under_test", HUB_PY)
     mod = importlib.util.module_from_spec(spec)
     # run_name 不设为 __main__，所以末尾的 main() 不会跑
     spec.loader.exec_module(mod)

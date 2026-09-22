@@ -68,7 +68,7 @@ except OSError:
     pass
 CFG_PATH = os.path.join(BASE, "hub.json")
 DB_PATH = os.path.join(BASE, "hub.db")
-VERSION = "0.1.13"
+VERSION = "0.1.14"
 TZ = timezone(timedelta(hours=8))          # 北京时间（用户在国内，固定 +8，避免服务器 UTC 漂移）
 
 DEFAULT_CFG = {
@@ -1583,7 +1583,7 @@ def fetch_weather(days=2):
            f"&timezone=Asia%2FShanghai&forecast_days={days}")
     try:
         req = _urlreq.Request(url)
-        req.add_header("User-Agent", "Mozilla/5.0 (whale-hub)")
+        req.add_header("User-Agent", "Mozilla/5.0 (whalecare)")
         with _urlreq.urlopen(req, timeout=20) as r:
             d = json.loads(r.read().decode())
     except Exception as e:

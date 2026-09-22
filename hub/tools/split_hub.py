@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""把 hub.py 按章节机械切成 src/whalehub/NN_*.py 片段（切片，不重写、不重排）。
+"""把 hub.py 按章节机械切成 src/whalecare/NN_*.py 片段（切片，不重写、不重排）。
 
 切点来自文件里已有的章节注释，保证：
   - 每个片段单独是合法 Python（片段内不跨文件引用）
@@ -10,7 +10,7 @@ import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HUB = os.path.join(ROOT, "hub.py")
-SRC = os.path.join(ROOT, "src", "whalehub")
+SRC = os.path.join(ROOT, "src", "whalecare")
 
 lines = open(HUB, encoding="utf-8").read().splitlines(keepends=True)
 

@@ -3,8 +3,8 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "whalehub"
-version = "0.1.13"
+name = "whalecare"
+version = "0.1.14"
 description = "鲸鲸 · 自托管的个人数据中枢：常驻、能读你自己的数据、能主动关心"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,13 +28,13 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/DpVoliin/whale-hub"
-Repository = "https://github.com/DpVoliin/whale-hub"
-Issues = "https://github.com/DpVoliin/whale-hub/issues"
-Changelog = "https://github.com/DpVoliin/whale-hub/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/DpVoliin/whalecare"
+Repository = "https://github.com/DpVoliin/whalecare"
+Issues = "https://github.com/DpVoliin/whalecare/issues"
+Changelog = "https://github.com/DpVoliin/whalecare/blob/main/CHANGELOG.md"
 
 [project.scripts]
-whalehub = "whalehub.__main__:main"
+whalecare = "whalecare.__main__:main"
 
 [tool.setuptools]
 # 单文件分发是主线：这里只把合并产物 hub.py 装成可执行模块

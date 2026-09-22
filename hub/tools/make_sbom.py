@@ -47,8 +47,8 @@ def build() -> dict:
     # 中枢本体（单文件）
     comps.append({
         "type": "application",
-        "bom-ref": f"pkg:generic/whale-hub@{v}",
-        "name": "whale-hub",
+        "bom-ref": f"pkg:generic/whalecare@{v}",
+        "name": "whalecare",
         "version": v,
         "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
         "hashes": [{"alg": "SHA-256", "content": sha256(HUB)}],
@@ -72,7 +72,7 @@ def build() -> dict:
         "version": 1,
         "metadata": {
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "tools": [{"vendor": "whale-hub", "name": "make_sbom.py", "version": "1"}],
+            "tools": [{"vendor": "whalecare", "name": "make_sbom.py", "version": "1"}],
             "component": comps[0],
         },
         "components": comps,

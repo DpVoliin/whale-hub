@@ -69,7 +69,7 @@ INJECT = [
 def load_hub(home: pathlib.Path):
     home.mkdir(parents=True, exist_ok=True)
     os.environ["WHALE_HOME"] = str(home)
-    spec = importlib.util.spec_from_file_location("whalehub_probe", HUB_SRC)
+    spec = importlib.util.spec_from_file_location("whalecare_probe", HUB_SRC)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

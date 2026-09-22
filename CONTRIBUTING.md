@@ -9,7 +9,7 @@
 鲸鲸的中枢是「**片段源码 → 合并成单文件**」的结构。这是刻意的设计（见 `docs/adr/`），不是历史包袱。
 
 ```
-hub/src/whalehub/          ← 你改这里（13 个片段，数字前缀 = 合并顺序）
+hub/src/whalecare/          ← 你改这里（13 个片段，数字前缀 = 合并顺序）
   ├── 00_header.py          导入与常量
   ├── 10_core.py            数据库与核心工具
   ├── 20_timetable.py       课表
@@ -32,7 +32,7 @@ hub/dist/hub.py            ← 合并中间产物，**不进 git**
 
 ```bash
 # 1. 改片段
-vim hub/src/whalehub/60_analysis.py
+vim hub/src/whalecare/60_analysis.py
 
 # 2. 重新合并（命令是 hub/tools/，不是 tools/）
 python3 hub/tools/build_single.py        # 片段 → hub/dist/hub.py
@@ -42,7 +42,7 @@ cp hub/dist/hub.py hub/hub.py            # ★ 产物拷回 hub/hub.py（必须�
 cmp hub/hub.py hub/dist/hub.py && echo "✅ 一致"
 
 # 4. 两个文件一起提交
-git add hub/src/whalehub/60_analysis.py hub/hub.py
+git add hub/src/whalecare/60_analysis.py hub/hub.py
 ```
 
 **影响**：片段与产物必须**逐字节一致**，CI 会验证。改了片段忘了合并 → CI 红，报错会告诉你该跑哪条命令。
@@ -66,7 +66,7 @@ git add hub/src/whalehub/60_analysis.py hub/hub.py
 
 ```bash
 git clone <repo>
-cd whale-hub
+cd whalecare
 python3 -m venv .venv && . .venv/bin/activate
 
 # 运行时零依赖，但开发需要：
@@ -87,7 +87,7 @@ python3 -m unittest discover tests -v
 现有测试：
 - `tests/test_privacy_regression.py` — 脱敏回归（6 条 PII 规则 + 29 条真实形态）
 
-**欢迎补测试**，尤其是 `hub/src/whalehub/60_analysis.py` 里的统计函数（当前覆盖不足，是项目最大的技术债）。
+**欢迎补测试**，尤其是 `hub/src/whalecare/60_analysis.py` 里的统计函数（当前覆盖不足，是项目最大的技术债）。
 
 ## 代码风格
 

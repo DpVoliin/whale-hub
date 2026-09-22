@@ -7,10 +7,10 @@
 # 说明：容器只跑中枢本体（单文件零依赖）。**数据库挂载在 ./data**，
 #      删容器不会删数据 —— 这是本地优先的底线。
 services:
-  whale-hub:
+  whalecare:
     build: .
-    image: whale-hub:local
-    container_name: whale-hub
+    image: whalecare:local
+    container_name: whalecare
     restart: unless-stopped
     volumes:
       - ./data:/data

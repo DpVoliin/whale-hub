@@ -35,7 +35,7 @@ def pick(payload):
 
 def fetch():
     """取一次数。抛异常没关系（会被记进 /ext，下个周期再试）。"""
-    req = urllib.request.Request(URL, headers={"User-Agent": "whale-hub-ext/1.0"})
+    req = urllib.request.Request(URL, headers={"User-Agent": "whalecare-ext/1.0"})
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         payload = json.loads(r.read().decode("utf-8", "replace"))
     return pick(payload)

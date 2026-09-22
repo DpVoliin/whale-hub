@@ -3,7 +3,7 @@
 # 傻瓜式部署：把鲸鲸中枢一键跑起来。
 #
 #   bash onestep_deploy.sh                  # 装到 /root/hub，明文口 11440 / HTTPS 11443
-#   bash onestep_deploy.sh --prefix ~/whale-hub --port 11440 --tls-port 11443
+#   bash onestep_deploy.sh --prefix ~/whalecare --port 11440 --tls-port 11443
 #
 # 它会自动做完这些事（**各步骤都打印进度**，静默会被当成失败）：
 #   1. 建目录、放 hub.py
@@ -66,7 +66,7 @@ else
   if command -v openssl >/dev/null 2>&1; then
     IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
-      -keyout "$KEY" -out "$CRT" -subj "/CN=whale-hub" \
+      -keyout "$KEY" -out "$CRT" -subj "/CN=whalecare" \
       -addext "subjectAltName=IP:${IP:-127.0.0.1},IP:127.0.0.1" >/dev/null 2>&1 \
       || die "生成证书失败（openssl 版本太老？）"
     chmod 600 "$KEY"
@@ -134,8 +134,8 @@ echo "\$(date +%F\ %T) watchdog 拉起" >> "$PREFIX/logs/watchdog.log"
 EOF
 chmod +x "$WATCH"
 if command -v crontab >/dev/null 2>&1; then
-  ( crontab -l 2>/dev/null | grep -v "whale-hub watchdog"; \
-    echo "* * * * * $WATCH # whale-hub watchdog" ) | crontab - 2>/dev/null \
+  ( crontab -l 2>/dev/null | grep -v "whalecare watchdog"; \
+    echo "* * * * * $WATCH # whalecare watchdog" ) | crontab - 2>/dev/null \
     && say "5/7 守护已装（每分钟自检）" || say "5/7 装 crontab 失败 → 手动：* * * * * $WATCH"
 else
   say "5/7 没有 crontab → 守护脚本已放在 $WATCH，自己找调度器挂"

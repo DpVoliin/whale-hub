@@ -37,7 +37,7 @@ TARGETS = [
 
 # 放行：项目自己的模块、本地片段、以及平台专属模块
 ALLOW = {
-    "whalehub", "hub", "whale_voice", "whale_speaker", "whale_web",
+    "whalecare", "hub", "whale_voice", "whale_speaker", "whale_web",
     # 单片机/桌面挂件侧可能用到的本地模块
     "whale_card",
 }

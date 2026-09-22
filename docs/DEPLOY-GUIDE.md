@@ -20,7 +20,7 @@
 ## 第 1 步：把中枢跑起来
 
 ```bash
-git clone https://github.com/DpVoliin/whale-hub && cd whale-hub
+git clone https://github.com/DpVoliin/whalecare && cd whalecare
 python3 hub/hub.py
 ```
 

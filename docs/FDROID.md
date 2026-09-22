@@ -35,10 +35,10 @@ Categories:
   - Health and Fitness
   - Sports and Health
 License: MIT
-SourceCode: https://github.com/DpVoliin/whale-hub
-IssueTracker: https://github.com/DpVoliin/whale-hub/issues
+SourceCode: https://github.com/DpVoliin/whalecare
+IssueTracker: https://github.com/DpVoliin/whalecare/issues
 RepoType: git
-Repo: https://github.com/DpVoliin/whale-hub
+Repo: https://github.com/DpVoliin/whalecare
 
 Builds:
   - versionName: 0.6.0

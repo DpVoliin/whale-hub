@@ -14,7 +14,7 @@ read -r -p "  密码（至少 6 位）: " PW
 keytool -genkeypair -v \
   -keystore "$KS" -alias whale -keyalg RSA -keysize 4096 -validity 10950 \
   -storepass "$PW" -keypass "$PW" \
-  -dname "CN=$CN, OU=whale-hub, O=whale-hub, L=Guangzhou, ST=Guangdong, C=CN"
+  -dname "CN=$CN, OU=whalecare, O=whalecare, L=Guangzhou, ST=Guangdong, C=CN"
 cat > keystore.properties <<EOF
 storeFile=keystore/release.jks
 storePassword=$PW

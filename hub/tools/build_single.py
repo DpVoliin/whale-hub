@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""把 hub.py 机械拆成 src/whalehub/*.py 片段（在章节边界切），并保证"合并回去与原文件逐字节一致"。
+"""把 hub.py 机械拆成 src/whalecare/*.py 片段（在章节边界切），并保证"合并回去与原文件逐字节一致"。
 
 为什么用"片段 + 合并"而不是真正的 Python 包：
   卖点之一是**单文件、clone 即跑**。拆成包会把它弄没；而片段合并（amalgamation，
@@ -15,7 +15,7 @@ import ast
 import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "src", "whalehub")
+SRC = os.path.join(ROOT, "src", "whalecare")
 DIST = os.path.join(ROOT, "dist")
 
 

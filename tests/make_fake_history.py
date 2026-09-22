@@ -38,7 +38,7 @@ def load_hub(home: pathlib.Path):
     home.mkdir(parents=True, exist_ok=True)
     os.environ["WHALE_HOME"] = str(home)
     os.environ.setdefault("WHALE_QUIET", "1")
-    spec = importlib.util.spec_from_file_location("whalehub_fake", HUB_SRC)
+    spec = importlib.util.spec_from_file_location("whalecare_fake", HUB_SRC)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
