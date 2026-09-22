@@ -822,6 +822,47 @@ def cmd_audit(a):
 ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"      # 去掉 0/O/1/I/L（会读错）
 
 
+def cmd_schema(a):
+    """看 schema 版本与待跑迁移 —— 迁移出问题时第一个要看的就是它。"""
+    import re as _re
+    c = db()
+    cur = int(c.execute("PRAGMA user_version").fetchone()[0] or 0)
+    want = None
+    try:      # 从合并产物里读 SCHEMA_VERSION（hubctl 与 hub.py 同目录）
+        src = open(os.path.join(HERE, "hub.py"), encoding="utf-8").read()
+        m = _re.search(r"^SCHEMA_VERSION = (\d+)", src, _re.M)
+        want = int(m.group(1)) if m else None
+    except Exception:
+        pass
+    hr("schema")
+    print("  当前库         v%d" % cur)
+    print("  代码期望        %s" % ("v%d" % want if want is not None else "（读不到，看 hub.py）"))
+    if want is not None and cur < want:
+        print("  ⚠ 有 %d 个迁移没跑（下次启动 hub 会自动补；也可 hubctl migrate）" % (want - cur))
+    elif want is not None and cur > want:
+        print("  ⚠ 库比代码新（是不是降级了？）")
+    else:
+        print("  ✓ 一致")
+    print("  表：%s" % ", ".join(tables(c)))
+    if a.tables:
+        for t in tables(c):
+            print("    %-14s %s" % (t, ", ".join(cols(c, t))))
+    print("\n  迁移失败**不会**让中枢起不来（它会喊出来并停在上一版）；查完再改。")
+
+
+def cmd_migrate(a):
+    """手动跑一次迁移（平时不用：hub 启动时会自动跑）。"""
+    import importlib.util as _iu
+    spec = _iu.spec_from_file_location("hubc_mig", os.path.join(HERE, "hub.py"))
+    m = _iu.module_from_spec(spec)
+    os.environ.setdefault("WHALE_HOME", os.path.dirname(os.path.realpath(DB)) or HERE)
+    spec.loader.exec_module(m)
+    before = int(db().execute("PRAGMA user_version").fetchone()[0] or 0)
+    m.init_db()
+    after = int(db().execute("PRAGMA user_version").fetchone()[0] or 0)
+    print("  v%d → v%d%s" % (before, after, "" if before == after else "（已补上）"))
+
+
 def cmd_pair(a):
     """生成一次性配对码（给 MCU 中继 / 新设备换 token），或看最近的码。"""
     c = db()
@@ -921,6 +962,10 @@ def main():
     au.add_argument("--days", type=int, default=7, help="汇总窗口（默认近 7 天）")
     au.add_argument("--stats", action="store_true", help="先给按动作的汇总")
     au.set_defaults(fn=cmd_audit)
+    sc = sub.add_parser("schema", help="看 schema 版本 / 待跑迁移 / 表结构")
+    sc.add_argument("--tables", action="store_true", help="连每张表的字段一起列")
+    sc.set_defaults(fn=cmd_schema)
+    sub.add_parser("migrate", help="手动跑一次 schema 迁移（平时不用）").set_defaults(fn=cmd_migrate)
     pa = sub.add_parser("pair", help="生成一次性配对码（MCU 中继/新设备换 token 用）")
     pa.add_argument("--device", default="", help="绑定设备名（留空 = 任意设备可用）")
     pa.add_argument("--ttl", type=int, default=15, help="有效期分钟（默认 15）")

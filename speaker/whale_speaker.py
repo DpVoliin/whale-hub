@@ -218,7 +218,13 @@ def _save_pace(d):
 
 
 def material_score(ctx: dict) -> tuple:
-    """今天"有料程度"：越有料越值得开口。返回 (分数, 理由列表)。"""
+    """今天"有料程度"：越有料越值得开口。返回 (分数, 理由列表)。
+
+    也开了外挂口子（见下面的 strategy()）：返回 None 就一直用内置这套。
+    """
+    _r = _from_strategy("material_score", ctx)
+    if _r is not _MISS:
+        return _r
     score, why = 0, []
     w = ctx.get("weather_today") or {}
     if isinstance(w.get("rain_prob"), (int, float)) and w["rain_prob"] >= 60:
@@ -395,9 +401,64 @@ def interruption_stats(days: int = 7) -> dict:
     return st
 
 
+
+# ─────────────────────────── 可替换策略（外挂）───────────────────────────
+# 为什么开这个口子：数据源已经能外挂（中枢 ext/）、人设能外挂（personas/），
+# 但"多久说一次、什么算有料"这套**节奏与取舍**还焊死在代码里。
+# 想试新节奏就得改核心文件 —— 那是把所有用户都绑上实验车。
+# 契约：策略文件里可定义
+#     next_gap(ctx, quiet_hint=False) -> (秒, 理由)   # 返回 None = 交回内置实现
+#     material_score(ctx) -> (分数, [理由...])        # 同上
+# 路径：$WHALE_STRATEGY 或与本文件同目录的 whale_strategy.py（不存在就什么都不做）。
+# 加载失败/抛异常**都不影响说话**（只记一行 dbg）—— 外挂不能把主流程带崩。
+STRATEGY_PATH = os.getenv("WHALE_STRATEGY") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "whale_strategy.py")
+_STRATEGY = {"mod": None, "at": None}
+
+
+def strategy():
+    """取当前策略模块（按 mtime 热加载；没有就返回 None）。"""
+    try:
+        if not os.path.isfile(STRATEGY_PATH):
+            return None
+        mt = os.path.getmtime(STRATEGY_PATH)
+        if _STRATEGY["mod"] is not None and _STRATEGY["at"] == mt:
+            return _STRATEGY["mod"]
+        import importlib.util as _iu
+        spec = _iu.spec_from_file_location("whale_strategy", STRATEGY_PATH)
+        mod = _iu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _STRATEGY["mod"], _STRATEGY["at"] = mod, mt
+        _dbg("已加载自定义策略：%s" % STRATEGY_PATH)
+        return mod
+    except Exception as e:
+        _dbg("策略文件加载失败（继续用内置）：%s" % str(e)[:70])
+        return None
+
+
+def _from_strategy(fn_name, *args, **kw):
+    """先问外挂策略；它说 None 就用内置。"""
+    mod = strategy()
+    fn = getattr(mod, fn_name, None) if mod is not None else None
+    if callable(fn):
+        try:
+            r = fn(*args, **kw)
+            if r is not None:
+                return r
+        except Exception as e:
+            _dbg("策略 %s 报错（改用内置）：%s" % (fn_name, str(e)[:70]))
+    return _MISS
+
+
+_MISS = object()
+
 def next_gap(ctx: dict, quiet_hint: bool = False) -> tuple:
     """算"下次说话至少等多久"。返回 (秒, 理由)。"""
     st = pace()
+    # ★ 先问外挂策略（没有/返回 None 就走下面内置的）
+    _r = _from_strategy("next_gap", ctx, quiet_hint)
+    if _r is not _MISS:
+        return _r
     t = time.localtime().tm_hour * 60 + time.localtime().tm_min
 
     # ① 时间带基线

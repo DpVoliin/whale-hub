@@ -12,6 +12,12 @@
 """
 import random
 import re
+from datetime import datetime, timedelta, timezone
+
+# ★ 固定 +8，**不用机器本地时区**：中枢里 band_now() 是固定 +8 的，
+#   而服务器默认时区常常是 UTC —— 用 localtime 的话两边算出的桶名会不一样，
+#   后验就永远取不到（静默退化）。一致性由 tests/test_band_consistency.py 盯着。
+TZ = timezone(timedelta(hours=8))
 
 # ─────────────────────────── ① 语义去重 ───────────────────────────
 DUP_THRESHOLD = 0.55      # 3-gram Jaccard 达到多少判"同一件事"（在真实历史语料上标定，见 calibrate）
@@ -75,10 +81,9 @@ def band_key(ts=None):
 
     星期类分工作/周末（作息差异大）；时段带沿用她现有分带（早/白天/睡前/深夜）。
     """
-    import time as _t
-    lt = _t.localtime(ts) if ts else _t.localtime()
-    wk = "周末" if lt.tm_wday >= 5 else "工作日"
-    minutes = lt.tm_hour * 60 + lt.tm_min
+    dt = datetime.fromtimestamp(ts, TZ) if ts else datetime.now(TZ)
+    wk = "周末" if dt.weekday() >= 5 else "工作日"
+    minutes = dt.hour * 60 + dt.minute
     if 6 * 60 + 30 <= minutes < 10 * 60:
         band = "早上"
     elif minutes >= 21 * 60 + 30 or minutes < 30:

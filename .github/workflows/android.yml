@@ -55,7 +55,9 @@ jobs:
         if: failure()
         run: |
           if [ -f /tmp/build.log ]; then
-            echo "::error::$(grep -iE 'error|failed|what went wrong|Caused by|requires|Minimum supported|Unsupported|not compatible' /tmp/build.log | tail -12 | tr '\n' '~' | head -c 3500)"
+            # 先给过滤后的关键行，再补一段"最后 45 行"原始输出 —— 报错常常藏在没被关键词命中的行里
+            echo "::error::$(grep -iE 'error|failed|what went wrong|Caused by|requires|Minimum supported|Unsupported|not compatible|InvalidUserCode|project option' /tmp/build.log | tail -20 | tr '\n' '~' | head -c 2000)"
+            echo "::warning title=构建日志尾部::$(tail -45 /tmp/build.log | tr '\n' '~' | head -c 3000)"
           fi
 
       - name: 校验产物存在

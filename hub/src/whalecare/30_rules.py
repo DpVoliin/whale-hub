@@ -334,3 +334,24 @@ def compose_brief(kind="brief_morning"):
     return rid, text
 
 
+def band_now(when=None):
+    """场景桶 = 星期类 × 时段带。
+
+    ★ 必须与说话层 `whale_adapt.band_key()` **逐字一致**（工作日/周末 × 早上/白天/睡前/深夜）。
+      两边名字对不上，桶后验就永远取不到 → 分桶 Thompson 静默退化成全局后验。
+      以前的坑就在这：反馈（挂件点 ✓/✗）上报时不带桶，全部落进 `(无桶)`，
+      桶里永远没样本。现在中枢自己按上报时刻算，客户端一行都不用改。
+      一致性有跨模块测试盯着：tests/test_band_consistency.py。
+    """
+    dt = when or datetime.now(TZ)
+    wk = "周末" if dt.weekday() >= 5 else "工作日"
+    m = dt.hour * 60 + dt.minute
+    if 6 * 60 + 30 <= m < 10 * 60:
+        band = "早上"
+    elif m >= 21 * 60 + 30 or m < 30:
+        band = "睡前"
+    elif m < 6 * 60 + 30:
+        band = "深夜"
+    else:
+        band = "白天"
+    return "%s·%s" % (wk, band)

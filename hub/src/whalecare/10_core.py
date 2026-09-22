@@ -350,9 +350,41 @@ def db():
     return conn
 
 
-def init_db():
-    with db() as c:
-        c.executescript("""
+# ---------------------------------------------------------------- schema 迁移框架
+# 为什么要有它：以前改表结构 = 手写 ALTER + try/except 兜住，ctx 那次就是这么写进
+# executescript 的 —— 结果第二次启动报 duplicate column name，**init_db 整个中断**
+# （它之后的建表语句全部没执行，terminals 没建成 → /today 直接断连）。
+# 现在：版本号存 `PRAGMA user_version`，迁移是**有序函数列表**，一步一提交、可单独测、
+# 失败也不会让中枢起不来（报出来 + `hubctl schema` 能看出落在哪一版）。
+# 硬要求：**每个迁移都必须幂等**（IF NOT EXISTS / 先查再加列）—— 老库 user_version=0
+# 但表已存在，会被当成"从头跑一遍"，不幂等就会炸。
+SCHEMA_VERSION = 3
+_MIGRATIONS = []
+
+
+def migration(fn):
+    """注册一个迁移（注册顺序 = 版本顺序）。"""
+    _MIGRATIONS.append(fn)
+    return fn
+
+
+def _add_column(conn, table, col, ddl):
+    """幂等加列：已经有就跳过（ALTER 加已有列会报 duplicate column name）。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(%s)" % table)}
+    if col in cols:
+        return False
+    conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, col, ddl))
+    return True
+
+
+def _has_table(conn, name):
+    return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
+
+
+@migration
+def _mig_001_base(conn):
+    """v1：基础表（v0.1.x 的那套建表语句，全部 IF NOT EXISTS → 幂等）。"""
+    conn.executescript("""
         -- 迁移：删掉历史遗留的 UNIQUE 索引（它会吃数据）
         DROP INDEX IF EXISTS idx_metrics_dedup;
         CREATE TABLE IF NOT EXISTS metrics(
@@ -461,16 +493,47 @@ def init_db():
             used_by TEXT DEFAULT ''
         );
         """)
-        # ★ 旧库补列必须在 executescript **之外**，而且要先查有没有：
-        #   ALTER 加已有列会报 "duplicate column name"，而 executescript 里一报错
-        #   整个 init_db 就中断 —— 结果是"第二次启动起不来"（压测时踩到，必改）。
-        try:
-            _cols = {r[1] for r in c.execute("PRAGMA table_info(decisions)")}
-            if "ctx" not in _cols:
-                c.execute("ALTER TABLE decisions ADD COLUMN ctx TEXT DEFAULT ''")
-                print("[db] 迁移：decisions 补上 ctx 列（回放要用）", flush=True)
-        except Exception as e:
-            print("[db] 补 ctx 列失败（不影响其它功能）：%s" % str(e)[:70], flush=True)
+@migration
+def _mig_002_decisions_ctx(conn):
+    """v2：decisions 加 ctx（做决定时的输入；回放要能重算，不能只存结论）。"""
+    return _add_column(conn, "decisions", "ctx", "TEXT DEFAULT ''")
+
+
+@migration
+def _mig_003_audit_and_pair(conn):
+    """v3：audit（只记动作不记内容的审计）与 pair_codes（一次性配对码）。"""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS audit(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL, day TEXT NOT NULL, action TEXT NOT NULL,
+            target TEXT DEFAULT '', actor TEXT DEFAULT '',
+            result TEXT DEFAULT 'ok', note TEXT DEFAULT '');
+        CREATE INDEX IF NOT EXISTS idx_audit_day ON audit(day, id);
+        CREATE TABLE IF NOT EXISTS pair_codes(
+            code TEXT PRIMARY KEY, device TEXT DEFAULT '',
+            created_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+            used_at TEXT, used_by TEXT DEFAULT '');
+    """)
+
+
+def init_db():
+    """建库 + 迁移。**幂等**：连跑多次都安全（test_migrate.py 就是这么验的）。"""
+    with db() as c:
+        cur = int(c.execute("PRAGMA user_version").fetchone()[0] or 0)
+        for ver, fn in enumerate(_MIGRATIONS, start=1):
+            if ver <= cur:
+                continue
+            try:
+                fn(c)
+            except Exception as e:
+                # 迁移失败也**不许**把中枢带崩（自用系统：先可用，再把问题喊出来）
+                print("[db] ✗ 迁移到 v%d 失败：%s: %s（库停在 v%d，hubctl schema 可查）"
+                      % (ver, type(e).__name__, str(e)[:80], ver - 1), flush=True)
+                return
+            c.execute("PRAGMA user_version = %d" % ver)
+            c.commit()
+        if int(c.execute("PRAGMA user_version").fetchone()[0] or 0) != cur:
+            print("[db] schema v%d → v%d" % (cur, SCHEMA_VERSION), flush=True)
 
 
 def now_iso():

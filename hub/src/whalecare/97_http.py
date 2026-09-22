@@ -456,9 +456,12 @@ class Handler(BaseHTTPRequestHandler):
             v = str(b.get("verdict") or "").strip().lower()
             if v not in ("good", "bad"):
                 return self._send(400, {"ok": False, "error": "verdict 只能是 good / bad"})
+            # ★ 客户端的口子只传 verdict（挂件/App 都不知道"当前场景桶"是什么）；
+            #   桶由**中枢按上报时刻自己算** → 分桶 Thompson 才真能攒到样本。
+            band = str(b.get("band") or "").strip()[:24] or band_now()
             with db() as c:
                 c.execute("INSERT INTO feedback(ts, verdict, band, note) VALUES (?,?,?,?)",
-                          (now_iso(), v, str(b.get("band") or "")[:24], str(b.get("note") or "")[:200]))
+                          (now_iso(), v, band, str(b.get("note") or "")[:200]))
             print(f"[feedback] {v}", flush=True)
             return self._send(200, {"ok": True, "verdict": v})
         if path == "/persona":
