@@ -14,7 +14,7 @@
 | `episodes` | **情节记忆**：她说过什么/发生过什么（带 `sig` 指纹去重） | 手动删 | ✅ 只给"最近几条"的短摘要 |
 | `episodes_fts*` | 情节的全文索引（trigram，中文可搜） | 随 episodes 重建 | ❌ 派生数据 |
 | `decisions` | **决策日志**：每次"说/不说"的间隔、理由、料分、场景桶 | 手动删 | ❌（给人回放用） |
-| `feedback` | 挂件上的 ✓/✗ 反馈（Thompson 后验用） | 手动删 | ❌（只影响阈值，不进上下文） |
+| `feedback` | **反馈（两种来源）**：`verdict` + `w`（证据强度：手动点=1.0，隐式推断=0.4~0.6）+ `src`（`manual`/`implicit`）+ `band`（场景桶，客户端不传时由中枢按上报时刻自算）。隐式的三条边界见 README「你懒得点 ✓/✗ 也能学」 | 手动删 | ❌（只影响阈值，不进上下文） |
 | `audit` | **审计日志**：`action/target/actor/result/note` —— 鉴权失败、配置修改、导出/删除/备份、扩展报错、配对、token 轮换 | 手动删（`hubctl audit --day`） | ❌ **且设计上物理不存数据内容**（只记动作与对象，所以能安全外发） |
 | `pair_codes` | **一次性配对码**：`code/device/expires_at/used_at/used_by`。码用过即废，15 分钟过期；过期的自动清 | 自动清理 + 手动删 | ❌ |
 | `timetable` | 课表原文（岛课表导出的 JSON） | 手动删 | ⚠️ **只取节次与类型**，课程名/教师/教室都剥掉 |
@@ -50,7 +50,7 @@ curl -X POST -H "X-Token: $TOKEN" -H 'Content-Type: application/json' \
 
 ## 迁移策略（v0.1.17 起是框架，不是土办法）
 
-版本号存在 **`PRAGMA user_version`**；迁移是 `hub/src/whalecare/10_core.py` 里的**有序函数列表**
+版本号存在 **`PRAGMA user_version`**（当前 v4：001 基础表 / 002 decisions.ctx / 003 audit+pair_codes / 004 feedback.w+src）；迁移是 `hub/src/whalecare/10_core.py` 里的**有序函数列表**
 （`@migration` 装饰器，注册顺序 = 版本顺序），`init_db()` 启动时自动补跑，`hubctl schema` 可查。
 
 三条硬规矩（都是被现实咬出来的）：
