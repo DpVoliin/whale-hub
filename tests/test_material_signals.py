@@ -81,6 +81,41 @@ class TestMaterialSignals(unittest.TestCase):
         missing = sorted(sk - hk - OPTIONAL)
         self.assertEqual(missing, [], "料分读了中枢不给的键（会静默算 0 分）：%s" % missing)
 
+    def test_两份料分实现必须一致(self):
+        """闸门用的 material_of() 与要展示的 material_score() 必须**恒等**。
+
+        踩过的坑：这两个函数曾经是**两份独立实现**，字段名还各自跟中枢对不上；
+        只修一份就会出现"以为修好了、日志里料分还是 2"。现在 material_of 是薄封装，
+        这个断言让它们不可能再分家。
+        """
+        import importlib.util as iu
+        import os as _os
+        import tempfile
+        _os.environ.setdefault("WHALE_HOME", tempfile.mkdtemp(prefix="whale-mat-"))
+        sys_mod = __import__("sys")
+        spk_dir = str(ROOT / "speaker")
+        if spk_dir not in sys_mod.path:
+            sys_mod.path.insert(0, spk_dir)
+        spec = iu.spec_from_file_location("spk_mat_test", ROOT / "speaker" / "whale_speaker.py")
+        m = iu.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        # 三种典型上下文：空 / 一个真实形状的 / 极端的
+        cases = [
+            {},
+            {"weather_today": {"desc": "雷阵雨", "tmax": 32, "tmin": 24},
+             "weather_now": {"desc": "多云", "rain_24h": 0.0},
+             "pc_health": {"disk_free_percent": 1.1},
+             "classes": [{"periods": "第1-2节"}],
+             "screen_total_minutes_today": 536,
+             "screen_usage_minutes_by_category": {"社交": 296},
+             "surprise": {"其他": "x"}, "most_notable": {"what": "其他"}},
+            {"battery_percent": 8, "bluetooth_batteries": {"WF": {"percent": 5}},
+             "screen_total_minutes_today": 999},
+        ]
+        for c in cases:
+            self.assertEqual(m.material_of(c), m.material_score(c)[0],
+                             "两份料分结果不一致（ctx=%s）" % list(c))
+
     def test_可选键要在注释里说明为什么可选(self):
         # 防呆：往 OPTIONAL 里塞东西必须是真的"数据依赖"，别拿它当橡皮擦
         hk = hub_context_keys()

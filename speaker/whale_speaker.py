@@ -352,6 +352,16 @@ def material_score(ctx: dict) -> tuple:
     for nm, v in (ctx.get("bluetooth_batteries") or {}).items():
         if isinstance(v, dict) and isinstance(v.get("percent"), (int, float)) and v["percent"] <= 20:
             score += 1; why.append(f"{nm} {int(v['percent'])}%")
+    # 以下三条原来只存在于 material_of（闸门用的那份）里 —— 合并时不能丢
+    if ctx.get("weather_alert"):
+        score += 1; why.append("天气预警：%s" % str(ctx.get("weather_alert"))[:20])
+    if isinstance(wt.get("tmax"), (int, float)) and isinstance(wt.get("tmin"), (int, float)) \
+            and (wt["tmax"] - wt["tmin"]) >= 10:
+        score += 1; why.append(f"温差 {int(wt['tmax'] - wt['tmin'])} 度")
+    _catbig = [c for c, m in (ctx.get("screen_usage_minutes_by_category") or {}).items()
+               if isinstance(m, (int, float)) and m >= 90]
+    if _catbig:
+        score += 1; why.append("单个类别就到 %s 分钟" % "/".join(_catbig[:2]))
     cls = ctx.get("classes") or []                               # ★ 中枢给的是 classes 列表
     if isinstance(cls, list) and cls:
         score += 1; why.append(f"今天 {len(cls)} 节课")
@@ -838,35 +848,19 @@ def _log_decision(kind: str, gap_sec: float, reason: str, material: int, st: dic
 
 
 def material_of(ctx: dict) -> int:
-    """数一下今天有几件"值得说"的事 —— 期望效用 gate 的输入之一。"""
-    n = 0
+    """期望效用 gate 的输入 = 今天有几件「值得说」的事。
+
+    ★★ 这里曾经是**另一份独立实现**，而且字段名跟中枢对不上
+       （`screen_usage_minutes` / `calendar` / `weather_alert` 中枢都不给）→
+       那些料永远算 0 分；再加上只改了 material_score 没改它，
+       就出现"我以为修好了、日志里料分还是 2"。**两份逻辑 = 两份会各自腐烂的逻辑**，
+       所以现在只留一份：直接复用 material_score()。
+       回归测试 tests/test_material_signals.py 会断言两者一致。
+    """
     try:
-        w = ctx.get("weather_now") or {}
-        if (w.get("rain_1h") or 0) > 0 or (w.get("desc") or "").find("雨") >= 0:
-            n += 1
-        wt = ctx.get("weather_today") or {}
-        if wt.get("tmax", 0) and wt.get("tmin", 0) and (wt["tmax"] - wt["tmin"]) >= 10:
-            n += 1
-        if ctx.get("weather_alert"):
-            n += 1
-        b = ctx.get("battery_percent")
-        if b is not None and float(b) <= 20 and not ctx.get("battery_charging"):
-            n += 1
-        for _name, info in (ctx.get("bluetooth_batteries") or {}).items():
-            if isinstance(info, dict) and (info.get("percent") or 100) <= 20:
-                n += 1
-        if int(ctx.get("screen_usage_minutes") or 0) >= 480:
-            n += 1
-        for _cat, mins in (ctx.get("screen_usage_minutes_by_category") or {}).items():
-            if int(mins or 0) >= 90:
-                n += 1
-        if (ctx.get("calendar") or []):
-            n += 1
-        if ctx.get("surprise") or ctx.get("most_notable"):
-            n += 1
+        return int(material_score(ctx)[0])
     except Exception:
-        pass
-    return n
+        return 0
 
 
 def maybe_speak():
