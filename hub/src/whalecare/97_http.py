@@ -728,7 +728,7 @@ class Handler(BaseHTTPRequestHandler):
     def _mcu_auth(self, q) -> bool:
         tok = (q.get("t") or [""])[0] or (self.headers.get("X-Token") or "")
         mcu = (CFG.get("mcu") or {}).get("token") or ""
-        return bool(tok) and tok in (CFG.get("token"), mcu)
+        return bool(tok) and (self._same(tok, CFG.get("token")) or self._same(tok, mcu))
 
     def _mcu_inbox(self, q):
         """设备取一条要提醒的内容。回一行：ok|<id>|<文本> / none / err:token
@@ -850,9 +850,26 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_text(200, res["token"])
 
     # ---------------------------------------------------------------- 管理台（登录 / 会话）
+    @staticmethod
+    def _same(a, b) -> bool:
+        """常数时间比较（外部评审 3.5-1）：用 == 比较 token 是理论上的时序侧信道。
+        网络抖动远大于这点差异 → 低危；但改 compare_digest 零成本，没理由留着。"""
+        import hmac as _hmac
+        a, b = str(a or ""), str(b or "")
+        return len(a) == len(b) and _hmac.compare_digest(a, b)
+
+    def _secure_flag(self) -> str:
+        """HTTPS 上必须带 Secure；HTTP 上不能带（否则本地调试登录不了）。
+        判据取自连接本身，同进程同时听 11440/11443 也正确。"""
+        try:
+            import ssl as _ssl
+            return "; Secure" if isinstance(self.connection, _ssl.SSLSocket) else ""
+        except Exception:
+            return ""
+
     def _logged_in(self, q):
-        return ((self.headers.get("X-Token") or "") == CFG["token"]
-                or (self._cookie_sess() != "" and self._cookie_sess() == admin_session()))
+        return (self._same(self.headers.get("X-Token"), CFG["token"])
+                or (self._cookie_sess() != "" and self._same(self._cookie_sess(), admin_session())))
 
     def _login(self, q):
         if self._logged_in(q):
@@ -877,7 +894,8 @@ class Handler(BaseHTTPRequestHandler):
         audit("login", actor=self._client(), note="登录管理台")
         self.send_response(303)
         self.send_header("Set-Cookie",
-                         "whale_admin=%s; Path=/; HttpOnly; SameSite=Strict" % admin_session())
+                         "whale_admin=%s; Path=/; HttpOnly; SameSite=Strict%s"
+                         % (admin_session(), self._secure_flag()))
         self.send_header("Location", "/admin")
         self.send_header("Content-Length", "0")
         self.end_headers()

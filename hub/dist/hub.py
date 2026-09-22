@@ -517,6 +517,13 @@ def _same_fact(a, b):
 
 def db():
     conn = sqlite3.connect(DB_PATH, timeout=10)
+    # ★ WAL（外部评审 3.2）：读写并发下不再互相饿死。
+    #   timeout=10 本身已是 10 秒 busy 等待，真正缺的是 journal_mode；
+    #   它是**持久**设置，写一次记在库里，后续调用开销可忽略。
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except Exception:
+        pass
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -529,7 +536,7 @@ def db():
 # 失败也不会让中枢起不来（报出来 + `hubctl schema` 能看出落在哪一版）。
 # 硬要求：**每个迁移都必须幂等**（IF NOT EXISTS / 先查再加列）—— 老库 user_version=0
 # 但表已存在，会被当成"从头跑一遍"，不幂等就会炸。
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 _MIGRATIONS = []
 
 
@@ -754,18 +761,25 @@ def today_str():
 
 
 
+HALFLIFE_DAYS = 45.0    # 反馈权重半衰期（天）：人的作息会漂，见 TV-TS
+
+
 def band_stats(min_n=4):
     """分桶 Thompson：把反馈按"场景桶"（星期×时段）分组估 p(接受)。
 
     文献依据 EOPA arXiv:2608.04416 —— 反馈稀疏时**先分桶再决策**，
     但每桶样本太少就别信它（min_n 以下退回全局后验，避免"一次运气就改阈值"）。
     """
-    out = {"global": {}, "bands": {}, "min_n": min_n}
+    out = {"global": {}, "bands": {}, "min_n": min_n, "halflife_days": HALFLIFE_DAYS}
     try:
         with db() as c:
-            # ★ 按**证据强度**加权计数（手动 w=1，隐式 0.4~0.6）——见 _mig_004
-            rows = c.execute("SELECT band, verdict, SUM(COALESCE(w, 1.0)) n "
-                             "FROM feedback GROUP BY band, verdict").fetchall()
+            # ★ 证据强度加权（手动 w=1，隐式 0.4~0.6，见 _mig_004）
+            # ★ 再乘时间衰减 w × 0.5^(age_days / halflife)（外部评审 3.3-3 / TV-TS）
+            rows = c.execute(
+                "SELECT band, verdict, SUM(COALESCE(w, 1.0) * POWER(0.5,"
+                "  MAX(0.0, julianday('now','localtime') - julianday(substr(ts,1,10))) / ?)) n "
+                "FROM feedback GROUP BY band, verdict",
+                (HALFLIFE_DAYS,)).fetchall()
         tot = {"ok": 0, "bad": 0}
         for r in rows:
             b = str(r["band"] or "(无桶)")
@@ -796,10 +810,18 @@ def audit(action, target="", actor="", result="ok", note=""):
     """写一条审计。**任何情况下都不许影响主流程**（失败只打印）。"""
     try:
         with db() as c:
-            c.execute("INSERT INTO audit(ts, day, action, target, actor, result, note) "
-                      "VALUES (?,?,?,?,?,?,?)",
-                      (now_iso(), today_str(), str(action)[:32], str(target)[:120],
-                       str(actor)[:64], str(result)[:16], str(note)[:120]))
+            ts, day = now_iso(), today_str()
+            a, t, ac = str(action)[:32], str(target)[:120], str(actor)[:64]
+            res, nt = str(result)[:16], str(note)[:120]
+            # ★ 链式 hash：把上一条的 hash 算进来（见 _mig_005_audit_chain）
+            try:
+                _row = c.execute("SELECT hash FROM audit ORDER BY id DESC LIMIT 1").fetchone()
+                _prev = (_row["hash"] if _row else "") or ""
+            except Exception:
+                _prev = ""
+            _link = _audit_hash(_prev, ts, day, a, t, ac, res, nt)
+            c.execute("INSERT INTO audit(ts, day, action, target, actor, result, note, prev_hash, hash) "
+                      "VALUES (?,?,?,?,?,?,?,?,?)", (ts, day, a, t, ac, res, nt, _prev, _link))
     except Exception as e:
         print("[audit] 写入失败：%s" % str(e)[:70], flush=True)
 
@@ -913,7 +935,50 @@ def pair_list(limit=20):
         d["code"] = str(d["code"])[:4] + "**"          # 列表里不打印完整码（它本身是凭据）
         out.append(d)
     return out
-# ----------------------------------------------------------------- 课表 / 日程
+
+
+@migration
+def _mig_005_audit_chain(conn):
+    """审计日志防篡改（外部评审 3.5-3 条）：每条记上一条的 hash，形成链。
+
+    诚实边界：这是**篡改侦测**，不是阻止 —— 能改库的人也能重算整条链；
+    真正的防阻止要外部存证。但有链之后，改中间任意一条都会让后续 hash 全对不上。
+    """
+    _add_column(conn, "audit", "prev_hash", "TEXT DEFAULT ''")
+    _add_column(conn, "audit", "hash", "TEXT DEFAULT ''")
+
+
+def _audit_hash(prev, ts, day, action, target, actor, result, note) -> str:
+    """一条审计的链式 hash：把上一条的 hash 一起算进来。"""
+    import hashlib as _h
+    blob = "\x1f".join([str(x or "") for x in (prev, ts, day, action, target, actor, result, note)])
+    return _h.sha256(blob.encode("utf-8", "replace")).hexdigest()
+
+
+def audit_verify():
+    """校验审计链 → {ok, checked, skipped_legacy, broken_at, note}。
+
+    上链之前的老记录 hash 为空 → 跳过并在 skipped_legacy 里如实计数，
+    不假装历史也完整。
+    """
+    with db() as c:
+        rows = c.execute("SELECT * FROM audit ORDER BY id ASC").fetchall()
+    prev, checked, skipped, broken = "", 0, 0, None
+    for r in rows:
+        row = dict(r)
+        if not (row.get("hash") or ""):
+            skipped += 1
+            prev = ""
+            continue
+        want = _audit_hash(prev, row.get("ts"), row.get("day"), row.get("action"),
+                           row.get("target"), row.get("actor"), row.get("result"), row.get("note"))
+        if want != row["hash"]:
+            broken = row["id"]
+            break
+        prev, checked = row["hash"], checked + 1
+    return {"ok": broken is None, "checked": checked, "skipped_legacy": skipped,
+            "broken_at": broken,
+            "note": "链完整" if broken is None else "第 %s 条起被改过" % broken}# ----------------------------------------------------------------- 课表 / 日程
 def _timetable():
     with db() as c:
         row = c.execute("SELECT raw, source, updated_at FROM timetable WHERE id=1").fetchone()
@@ -3976,7 +4041,7 @@ class Handler(BaseHTTPRequestHandler):
     def _mcu_auth(self, q) -> bool:
         tok = (q.get("t") or [""])[0] or (self.headers.get("X-Token") or "")
         mcu = (CFG.get("mcu") or {}).get("token") or ""
-        return bool(tok) and tok in (CFG.get("token"), mcu)
+        return bool(tok) and (self._same(tok, CFG.get("token")) or self._same(tok, mcu))
 
     def _mcu_inbox(self, q):
         """设备取一条要提醒的内容。回一行：ok|<id>|<文本> / none / err:token
@@ -4098,9 +4163,26 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_text(200, res["token"])
 
     # ---------------------------------------------------------------- 管理台（登录 / 会话）
+    @staticmethod
+    def _same(a, b) -> bool:
+        """常数时间比较（外部评审 3.5-1）：用 == 比较 token 是理论上的时序侧信道。
+        网络抖动远大于这点差异 → 低危；但改 compare_digest 零成本，没理由留着。"""
+        import hmac as _hmac
+        a, b = str(a or ""), str(b or "")
+        return len(a) == len(b) and _hmac.compare_digest(a, b)
+
+    def _secure_flag(self) -> str:
+        """HTTPS 上必须带 Secure；HTTP 上不能带（否则本地调试登录不了）。
+        判据取自连接本身，同进程同时听 11440/11443 也正确。"""
+        try:
+            import ssl as _ssl
+            return "; Secure" if isinstance(self.connection, _ssl.SSLSocket) else ""
+        except Exception:
+            return ""
+
     def _logged_in(self, q):
-        return ((self.headers.get("X-Token") or "") == CFG["token"]
-                or (self._cookie_sess() != "" and self._cookie_sess() == admin_session()))
+        return (self._same(self.headers.get("X-Token"), CFG["token"])
+                or (self._cookie_sess() != "" and self._same(self._cookie_sess(), admin_session())))
 
     def _login(self, q):
         if self._logged_in(q):
@@ -4125,7 +4207,8 @@ class Handler(BaseHTTPRequestHandler):
         audit("login", actor=self._client(), note="登录管理台")
         self.send_response(303)
         self.send_header("Set-Cookie",
-                         "whale_admin=%s; Path=/; HttpOnly; SameSite=Strict" % admin_session())
+                         "whale_admin=%s; Path=/; HttpOnly; SameSite=Strict%s"
+                         % (admin_session(), self._secure_flag()))
         self.send_header("Location", "/admin")
         self.send_header("Content-Length", "0")
         self.end_headers()

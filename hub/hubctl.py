@@ -783,7 +783,19 @@ def _audit_row(action, target="", actor="hubctl", result="ok", note=""):
 
 
 def cmd_audit(a):
-    """看审计日志 —— 只记「动作 + 对象 + 结果」，**不记数据内容**（所以能放心直接看/外发）。"""
+    """看审计日志 —— 只记「动作 + 对象 + 结果」，**不记数据内容**（所以能放心直接看/外发）。
+
+    `--verify`：校验防篡改哈希链（外部评审 3.5-3）。逻辑来自产物 hub.py，
+    本文件不复制一份算法（复制就会漂移 —— 本项目反复踩过的坑）。
+    """
+    if getattr(a, "verify", False):
+        r = _load_product().audit_verify()
+        print(f"  审计链：{'✓ ' + r['note'] if r['ok'] else '✗ ' + r['note']}")
+        print(f"  已校验 {r['checked']} 条" + (f" · 跳过 {r['skipped_legacy']} 条上链前的老记录"
+                                            if r.get('skipped_legacy') else ""))
+        if not r["ok"]:
+            print(f"  被改动的是 id = {r['broken_at']}（它之后的所有记录都不再可信）")
+        return
     c = db()
     if not has(c, "audit"):
         hr("审计日志")
@@ -912,6 +924,10 @@ def main():
     w = sub.add_parser("watch", help="跟着看新数据（Ctrl-C 退出）")
     w.add_argument("-i", "--interval", type=float, default=3.0); w.set_defaults(fn=cmd_watch)
     sub.add_parser("doctor", help="体检（库/端口/磁盘/新鲜度）").set_defaults(fn=cmd_doctor)
+    ev = sub.add_parser("eval", help="离线评估开口策略（回放式：接受率/效用/regret）")
+    ev.add_argument("--sweep", action="store_true", help="追加成本权重敏感性扫描")
+    ev.add_argument("--json", action="store_true", dest="as_json")
+    ev.set_defaults(fn=cmd_eval)
     sub.add_parser("ping", help="看中枢活着没").set_defaults(fn=cmd_ping)
     cf = sub.add_parser("config", help="看/改 hub.json")
     cf.add_argument("action", choices=["get", "set"]); cf.add_argument("key", nargs="?")
@@ -956,6 +972,7 @@ def main():
     rs = sub.add_parser("restore", help="还原库")
     rs.add_argument("file"); rs.add_argument("--yes", action="store_true"); rs.set_defaults(fn=cmd_restore)
     au = sub.add_parser("audit", help="审计日志（鉴权失败/配置修改/导出备份/扩展报错/配对）")
+    au.add_argument("--verify", action="store_true", help="校验防篡改哈希链（外部评审 3.5-3）")
     au.add_argument("-n", "--limit", type=int, default=40, help="看最近 N 条；0 = 只看汇总")
     au.add_argument("--action", help="只看某类动作（auth_fail/config_change/export/erase/backup/ext_error/pair_*）")
     au.add_argument("--day", help="只看某天（YYYY-MM-DD）")
@@ -978,6 +995,38 @@ def main():
         p.print_help()
         return
     a.fn(a)
+
+
+
+
+def _load_product():
+    """加载同目录的 hub.py（产物）。审计链算法只该有唯一一份实现 —— 复制到 hubctl 必然漂移。"""
+    import importlib.util
+    here = os.path.dirname(os.path.realpath(__file__))
+    for cand in (os.path.join(here, "hub.py"), os.path.join(here, "dist", "hub.py")):
+        if os.path.isfile(cand):
+            spec = importlib.util.spec_from_file_location("whalecare_product", cand)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+    raise SystemExit("  找不到 hub.py（应与 hubctl.py 同目录）")
+
+
+def cmd_eval(a):
+    """离线评估开口策略（回放式）：转发给 tools/policy_eval.py。"""
+    import subprocess
+    import sys as _sys
+    here = os.path.dirname(os.path.realpath(__file__))
+    for cand in (os.path.join(here, "tools", "policy_eval.py"),
+                 os.path.join(here, "policy_eval.py")):
+        if os.path.isfile(cand):
+            argv = [_sys.executable, cand]
+            if getattr(a, "sweep", False):
+                argv.append("--sweep")
+            if getattr(a, "as_json", False):
+                argv.append("--json")
+            raise SystemExit(subprocess.call(argv))
+    print("  找不到 policy_eval.py（应与 hubctl.py 同目录，或放在 tools/ 下）")
 
 
 if __name__ == "__main__":
