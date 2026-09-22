@@ -30,8 +30,11 @@ dependencies = []
 [project.urls]
 Homepage = "https://github.com/DpVoliin/whalecare"
 Repository = "https://github.com/DpVoliin/whalecare"
+Source = "https://github.com/DpVoliin/whalecare"
 Issues = "https://github.com/DpVoliin/whalecare/issues"
 Changelog = "https://github.com/DpVoliin/whalecare/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/DpVoliin/whalecare/blob/main/README.md"
+Privacy = "https://github.com/DpVoliin/whalecare/blob/main/docs/PRIVACY.md"
 
 [project.scripts]
 whalecare = "whalecare.__main__:main"
