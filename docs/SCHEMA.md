@@ -50,7 +50,7 @@ curl -X POST -H "X-Token: $TOKEN" -H 'Content-Type: application/json' \
 
 ## 迁移策略（v0.1.17 起是框架，不是土办法）
 
-版本号存在 **`PRAGMA user_version`**（当前 v4：001 基础表 / 002 decisions.ctx / 003 audit+pair_codes / 004 feedback.w+src）；迁移是 `hub/src/whalecare/10_core.py` 里的**有序函数列表**
+版本号存在 **`PRAGMA user_version`**（当前 v5：001 基础表 / 002 decisions.ctx / 003 audit+pair_codes / 004 feedback.w+src / 005 audit 链式 hash(prev_hash+hash)）；迁移是 `hub/src/whalecare/10_core.py` 里的**有序函数列表**
 （`@migration` 装饰器，注册顺序 = 版本顺序），`init_db()` 启动时自动补跑，`hubctl schema` 可查。
 
 三条硬规矩（都是被现实咬出来的）：
