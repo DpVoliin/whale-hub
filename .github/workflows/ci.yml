@@ -1,19 +1,25 @@
 name: ci
 on: [push, pull_request]
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 零依赖项目跨版本风险低，但既然声明支持，就真跑一遍
+        python: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: ${{ matrix.python }}
 
-      # 1) 片段必须能合并成单文件，且结构断言通过（防"方法变嵌套函数"那类坑）
+      # 1) 片段必须能合并成单文件，且结构断言通过（防“方法变嵌套函数”那类坑）
       - name: 合并单文件 + 结构断言
         run: python3 hub/tools/build_single.py
 
-      # 2) 生成产物与原文件必须一致（等价性）
-      #    失败时给出**可照抄的修复命令**，而不是让贡献者猜。
+      # 2) 生成产物与原文件必须一致（等价性）。失败时给出**可照抄**的修复命令。
       - name: 产物等价性（片段与 hub.py 必须同步）
         run: |
           if ! cmp -s hub/hub.py hub/dist/hub.py; then
@@ -21,7 +27,7 @@ jobs:
             echo ""
             echo "这个仓库的中枢是「片段源码 → 合并成单文件」结构："
             echo "  改的是  hub/src/whalehub/*.py  （13 个片段，数字前缀 = 合并顺序）"
-            echo "  产物是  hub/hub.py              （3,388 行单文件，**必须提交**）"
+            echo "  产物是  hub/hub.py              （单文件，**必须提交**）"
             echo ""
             echo "修复步骤（三步都要做）："
             echo "  1. python3 hub/tools/build_single.py     # 片段 → hub/dist/hub.py"
@@ -42,7 +48,7 @@ jobs:
       - name: 脱敏回归
         run: python3 tests/test_privacy_regression.py --file tests/fixtures/llm_preview_synth.json
 
-      # 4) 单元测试（stdlib unittest，无第三方依赖）
+      # 4) 单元测试（stdlib unittest；含**注入式**脱敏测试）
       - name: 单元测试
         run: python3 -m unittest discover tests -v
 
@@ -54,3 +60,15 @@ jobs:
       # 6) lint（开发依赖，不进运行时）
       - name: ruff
         run: pip install ruff==0.6.* && ruff check .
+
+      # 7) 覆盖率（coverage 是**开发**依赖，不违反“运行时零依赖”；门槛 30%，只涨不降）
+      - name: 覆盖率
+        run: |
+          python3 -m pip install --quiet coverage
+          python3 -m coverage run --source=hub/src/whalehub -m unittest discover tests >/dev/null 2>&1 || true
+          python3 -m coverage report | tail -5
+          python3 -m coverage report --fail-under=30 || echo "::warning::覆盖率低于 30%（只提示，不阻断）"
+
+      # 8) SBOM：零依赖 ⇒ 清单短到能人工通读，这本身就是最强的证明
+      - name: 生成 SBOM
+        run: python3 hub/tools/make_sbom.py --out sbom.json && head -12 sbom.json

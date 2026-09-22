@@ -152,6 +152,90 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+
+    def _export(self, q):
+        """GDPR Art.20 数据可携带：机器可读的全量导出（SQLite 本身就是标准格式，这里是 JSON 版）。
+
+        ?redact=1 → 顺手脱敏（去掉通知原文这类内容），方便你把数据分享/交给别人分析。
+        """
+        redact = (q.get("redact") or ["0"])[0] == "1"
+        out = {"version": VERSION, "exported_at": now_iso(), "redacted": redact, "tables": {}}
+        with db() as c:
+            names = [r["name"] for r in c.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+                "AND name NOT LIKE '%_fts_%' AND name NOT LIKE '%_fts' ORDER BY name")]   # 派生索引不导出
+            def _jsonable(v):
+                """SQLite 行里可能有 bytes（BLOB）→ 转成可 JSON 序列化的形式。"""
+                if isinstance(v, (bytes, bytearray, memoryview)):
+                    import base64 as _b64          # 局部导入：不依赖文件顶部的导入顺序
+                    return _b64.b64encode(bytes(v)).decode("ascii")
+                return v
+
+            for t in names:
+                rows = [{k: _jsonable(v) for k, v in dict(r).items()}
+                        for r in c.execute("SELECT * FROM %s" % t)]
+                if redact:
+                    for row in rows:
+                        for k in ("meta", "text", "content", "raw", "note"):
+                            if k not in row or not row[k]:
+                                continue
+                            if k == "meta" and isinstance(row[k], str) and row[k].startswith("{"):
+                                try:
+                                    m = json.loads(row[k])
+                                    for drop in ("raw", "text", "title", "store", "tracking", "window",
+                                                 "process", "app", "artist", "playlist"):
+                                        m.pop(drop, None)
+                                    row[k] = json.dumps(m, ensure_ascii=False)
+                                except Exception:
+                                    row[k] = "{}"
+                            elif k != "meta":
+                                row[k] = None
+                out["tables"][t] = rows
+        return self._send(200, out)
+
+    def _erase(self, body):
+        """GDPR Art.17 删除权：真的把数据删掉（不是标记）。
+
+        必须显式带 {"confirm": "ERASE-ALL"} —— 防止误触。
+        删之前自动做一次备份（如果备份函数可用），删完 VACUUM 回收空间。
+        """
+        if (body or {}).get("confirm") != "ERASE-ALL":
+            return self._send(400, {"ok": False, "error": "要删除必须带 confirm=ERASE-ALL",
+                                    "note": "scope 可选 all/metrics/episodes/chats/reminders，默认 all"})
+        scope = str((body or {}).get("scope") or "all")
+        tables = {
+            "all": ["metrics", "reminders", "chats", "episodes", "decisions", "feedback", "fired", "scheduled"],
+            "metrics": ["metrics"],
+            "episodes": ["episodes"],
+            "chats": ["chats"],
+            "reminders": ["reminders", "scheduled", "fired"],
+        }.get(scope)
+        if not tables:
+            return self._send(400, {"ok": False, "error": "scope 不认识：%s" % scope})
+        backup = "未做"
+        try:
+            if callable(globals().get("make_backup")):
+                backup = "已备份到 hub/backup/"
+                make_backup()                      # 万一删错还能捞回来
+        except Exception as e:
+            backup = "备份失败：%s" % type(e).__name__
+        deleted = {}
+        with db() as c:
+            for t in tables:
+                try:
+                    deleted[t] = c.execute("DELETE FROM %s" % t).rowcount
+                except Exception:
+                    pass
+            try:
+                c.execute("VACUUM")
+            except Exception:
+                pass
+        print("[erase] scope=%s 删除 %s（备份：%s）" % (scope, deleted, backup), flush=True)
+        return self._send(200, {"ok": True, "scope": scope, "deleted_rows": deleted,
+                                "backup": backup,
+                                "note": "已物理删除并 VACUUM。原始数据只在你自己的服务器上，删掉即彻底消失。"})
+
+
     def do_GET(self):
         if not self._guard():
             return
@@ -180,6 +264,8 @@ class Handler(BaseHTTPRequestHandler):
                 "hooks": sorted(EXT["hooks"].keys()),
                 "note": "外挂扩展：加一个文件就多一个数据源，中枢核心不需要改；扩展报错不影响主流程",
             })
+        if path == "/export":
+            return self._export(q)
         if path == "/today":
             return self._today(q)
         if path == "/feedback":
@@ -271,6 +357,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(413, {"error": f"请求太大，上限 {MAX_BODY // 1024}KB"})
         if not self._auth(q):
             return
+        if path == "/bands":
+            # 分桶接受率（说话层用它做期望效用 gate；样本不足的桶会被标 reliable=false）
+            return self._send(200, band_stats())
+        if path == "/decision":
+            # 说话层把"为什么这么决定"上报进来（回放器靠它；此前后端没开这个路由，日志一直是 0 条）
+            b = self._body() or {}
+            try:
+                decision_log(str(b.get("kind") or "speak"), float(b.get("gap_sec") or 0),
+                             str(b.get("reason") or "")[:200], int(b.get("material") or 0),
+                             int(b.get("said") or 0), str(b.get("band") or ""))
+                return self._send(200, {"ok": True})
+            except Exception as e:
+                return self._send(500, {"ok": False, "error": "%s: %s" % (type(e).__name__, str(e)[:80])})
+        if path == "/erase":
+            return self._erase(self._body())
         if path == "/ingest":
             return self._ingest(self._body())
         if path == "/timetable":

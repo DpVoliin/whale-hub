@@ -459,3 +459,33 @@ def today_str():
     return datetime.now(TZ).strftime("%Y-%m-%d")
 
 
+
+
+def band_stats(min_n=4):
+    """分桶 Thompson：把反馈按"场景桶"（星期×时段）分组估 p(接受)。
+
+    文献依据 EOPA arXiv:2608.04416 —— 反馈稀疏时**先分桶再决策**，
+    但每桶样本太少就别信它（min_n 以下退回全局后验，避免"一次运气就改阈值"）。
+    """
+    out = {"global": {}, "bands": {}, "min_n": min_n}
+    try:
+        with db() as c:
+            rows = c.execute("SELECT band, verdict, COUNT(*) n FROM feedback GROUP BY band, verdict").fetchall()
+        tot = {"ok": 0, "bad": 0}
+        for r in rows:
+            b = str(r["band"] or "(无桶)")
+            v = str(r["verdict"] or "")
+            k = "ok" if v in ("up", "1", "good", "yes") else ("bad" if v in ("down", "0", "bad", "no") else None)
+            if not k:
+                continue
+            d = out["bands"].setdefault(b, {"ok": 0, "bad": 0, "n": 0})
+            d[k] += int(r["n"]); d["n"] += int(r["n"])
+            tot[k] += int(r["n"])
+        for d in out["bands"].values():
+            d["p_accept"] = round((1 + d["ok"]) / (2 + d["ok"] + d["bad"]), 3)
+            d["reliable"] = d["n"] >= min_n
+        out["global"] = {"ok": tot["ok"], "bad": tot["bad"], "n": tot["ok"] + tot["bad"],
+                         "p_accept": round((1 + tot["ok"]) / (2 + tot["ok"] + tot["bad"]), 3)}
+    except Exception as e:
+        out["error"] = "%s: %s" % (type(e).__name__, str(e)[:60])
+    return out

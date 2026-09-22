@@ -1,0 +1,52 @@
+# 数据库表结构（每一张表存什么、留多久、哪些字段进过模型）
+
+> 一句话：**原始数据只在你自己的服务器上**；进模型的东西一律先过脱敏，`/llm-preview` 可以随时核对。
+
+## 表清单
+
+| 表 | 存什么 | 保留 | 会进模型吗 |
+|---|---|---|---|
+| `metrics` | 所有采集到的数据点：`ts/day/device/metric/value/unit/source/confidence/meta` | `privacy.retention_days`（默认 365 天，`0`=永久） | **只有聚合后的少数几项**（见下） |
+| `reminders` | 待推送/已推送的提醒（定点提醒、规则触发） | 随 metrics 一起清理 | ❌ |
+| `scheduled` | 用户设的定点提醒（`at/text/daily`） | 永久（除非你删） | ❌（只用于投递） |
+| `fired` | 已触发记录（防重复触发） | 永久 | ❌ |
+| `chats` | 与她的对话记录 | 手动删 | ❌（`/memory` 检索时给"最近说过的事"摘要） |
+| `episodes` | **情节记忆**：她说过什么/发生过什么（带 `sig` 指纹去重） | 手动删 | ✅ 只给"最近几条"的短摘要 |
+| `episodes_fts*` | 情节的全文索引（trigram，中文可搜） | 随 episodes 重建 | ❌ 派生数据 |
+| `decisions` | **决策日志**：每次"说/不说"的间隔、理由、料分、场景桶 | 手动删 | ❌（给人回放用） |
+| `feedback` | 挂件上的 ✓/✗ 反馈（Thompson 后验用） | 手动删 | ❌（只影响阈值，不进上下文） |
+| `timetable` | 课表原文（岛课表导出的 JSON） | 手动删 | ⚠️ **只取节次与类型**，课程名/教师/教室都剥掉 |
+| `terminals` / devices | 设备名与最后上报时间 | 永久 | ❌ |
+
+## 进模型的字段（唯一入口：`llm_context()`）
+
+允许进模型的**只有**：分类名、粗粒度数值、小时级时间、城市级天气、曲名/歌手、游戏名、金额区间、节次与类型。
+
+**明确剥掉**（每次都在 `/llm-preview` 的 `what_model_never_sees` 里列出）：
+
+```
+通知原文 · 日程标题与地点 · 具体 App 名（游戏名保留）· 分钟级时间
+电脑的进程名/窗口标题/文件名 · 蓝牙 MAC · 精确经纬度 · 设备名与型号
+待办原文（只给条数）· 睡眠原始值与精确入睡时刻 · 订单商品名/店铺/精确金额
+```
+
+## 数据可携带与删除（GDPR Art.20 / Art.17）
+
+```bash
+# 全量导出（机器可读 JSON；?redact=1 顺手脱敏，方便分享）
+curl -H "X-Token: $TOKEN" "https://你的服务器:11443/export?redact=1" -o my-data.json
+
+# 物理删除（必须显式确认；删前自动备份一份，删完 VACUUM 回收）
+curl -X POST -H "X-Token: $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"confirm":"ERASE-ALL"}' "https://你的服务器:11443/erase"
+
+# 只删某一类：scope = metrics | episodes | chats | reminders
+```
+
+> 命令行等价物：`hubctl dump --redact --encrypt` / `hubctl prune`。
+> **"删掉 `hub.db` 就是彻底删除"** —— 这套系统没有云端副本，也不需要"注销账号"。
+
+## 迁移策略
+
+现在**没有**迁移框架：改表结构时用 `ALTER TABLE ... ADD COLUMN`（向后兼容），
+破坏性改动必须写进 `docs/adr/` 并附一段迁移脚本（计划上 `PRAGMA user_version` + 迁移链）。

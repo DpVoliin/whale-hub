@@ -1,0 +1,81 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:4abb5816-8a50-49c9-bfe6-9b7dbfa455cd",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-09-22T00:35:48Z",
+    "tools": [
+      {
+        "vendor": "whale-hub",
+        "name": "make_sbom.py",
+        "version": "1"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "bom-ref": "pkg:generic/whale-hub@0.1.0",
+      "name": "whale-hub",
+      "version": "0.1.0",
+      "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6bd507290cbf3d40d58e188b7974be44bfa9ccdd49d69ece97a5fcdb1931c977"
+        }
+      ],
+      "properties": [
+        {
+          "name": "whale:runtime-dependencies",
+          "value": "0（仅 Python 标准库）"
+        },
+        {
+          "name": "whale:source-commit",
+          "value": "df7f4673c4db578a1d9a80179ce7d6f9b207396a"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "application",
+      "bom-ref": "pkg:generic/whale-hub@0.1.0",
+      "name": "whale-hub",
+      "version": "0.1.0",
+      "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6bd507290cbf3d40d58e188b7974be44bfa9ccdd49d69ece97a5fcdb1931c977"
+        }
+      ],
+      "properties": [
+        {
+          "name": "whale:runtime-dependencies",
+          "value": "0（仅 Python 标准库）"
+        },
+        {
+          "name": "whale:source-commit",
+          "value": "df7f4673c4db578a1d9a80179ce7d6f9b207396a"
+        }
+      ]
+    },
+    {
+      "type": "platform",
+      "bom-ref": "pkg:generic/cpython@3.11+",
+      "name": "CPython",
+      "version": ">=3.11",
+      "description": "唯一运行时。不需要 pip install，不需要 venv。"
+    }
+  ],
+  "properties": [
+    {
+      "name": "whale:third-party-runtime-deps",
+      "value": "0"
+    },
+    {
+      "name": "whale:audit-note",
+      "value": "零运行时依赖 ⇒ 本清单即完整清单；hub/tools/check_no_deps.py 在 CI 里机器守卫这一点"
+    }
+  ]
+}

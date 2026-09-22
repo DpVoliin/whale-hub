@@ -1,0 +1,31 @@
+# 一键起中枢（自托管用户流失最大的点就是"部署太麻烦"，这里给最短路径）
+#
+#   docker compose up -d
+#   docker compose logs -f          # 看启动日志，里面会打印 token 打码值
+#   cat ./data/hub.json             # 拿完整 token（第一次启动后生成）
+#
+# 说明：容器只跑中枢本体（单文件零依赖）。**数据库挂载在 ./data**，
+#      删容器不会删数据 —— 这是本地优先的底线。
+services:
+  whale-hub:
+    build: .
+    image: whale-hub:local
+    container_name: whale-hub
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    environment:
+      # 时区（提醒时间是按本地时区算的）
+      - TZ=Asia/Shanghai
+      # WHALE_HOME=/data 已在镜像里设好；数据都在这里
+    ports:
+      # 对外建议只暴露 HTTPS；明文口如需调试再放开
+      - "11443:11443"
+      # - "11440:11440"
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:11440/health',timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

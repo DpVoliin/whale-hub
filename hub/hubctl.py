@@ -43,7 +43,17 @@ from datetime import datetime, timedelta, timezone
 
 # realpath 会解开软链（/usr/local/bin/hubctl → /root/hub/hubctl.py），这样库目录才对
 HERE = os.path.dirname(os.path.realpath(__file__))
-DB = os.environ.get("WHALE_DB", os.path.join(HERE, "hub.db"))
+# 库位置优先级与中枢一致：WHALE_DB → $WHALE_HOME/hub.db → 脚本旁边（旧部署）
+def _resolve_db():
+    import os as _o
+    if _o.getenv("WHALE_DB"):
+        return _o.environ["WHALE_DB"]
+    if _o.getenv("WHALE_HOME"):
+        return _o.path.join(_o.environ["WHALE_HOME"], "hub.db")
+    return os.path.join(HERE, "hub.db")
+
+
+DB = _resolve_db()
 TZ = timezone(timedelta(hours=8))
 REDACT_KEYS = ("raw", "title", "artist", "text", "note", "app")
 
@@ -710,12 +720,47 @@ def cmd_decrypt(a):
         sys.exit(f"  解密失败（密码不对？）：{r.stderr.decode()[:120]}")
     print(f"  ✓ 已解密：{out}")
 
+
+def cmd_interruption(a):
+    """打扰仪表盘：多久说一次、被认可多少、都在哪些钟点说（文献里的"打扰预算"落地）"""
+    import collections
+    days = getattr(a, "days", 7)
+    with db() as c:
+        try:
+            dec = [dict(r) for r in c.execute(
+                "SELECT ts, kind, gap_sec, material, reason, band FROM decisions ORDER BY id DESC LIMIT 800")]
+        except Exception:
+            dec = []
+        try:
+            fb = [dict(r) for r in c.execute("SELECT ts, verdict FROM feedback ORDER BY id DESC LIMIT 400")]
+        except Exception:
+            fb = []
+    said = sum(1 for d in dec if d.get("kind") in ("speak", "said"))
+    silent = sum(1 for d in dec if d.get("kind") in ("silent", "wait"))
+    up = sum(1 for f in fb if str(f.get("verdict")) in ("up", "1", "good", "yes"))
+    down = sum(1 for f in fb if str(f.get("verdict")) in ("down", "0", "bad", "no"))
+    p_accept = (1 + up) / (2 + up + down)
+    hours = collections.Counter(str(d.get("ts") or "")[11:13] for d in dec if len(str(d.get("ts") or "")) > 13)
+    print("  打扰仪表盘（最近 %d 条决策 / %d 条反馈）" % (len(dec), len(fb)))
+    print("    开口 %d 次 · 沉默 %d 次 · 开口率 %.0f%%" % (said, silent, 100 * said / max(1, said + silent)))
+    print("    反馈 %d✓ / %d✗ · p(接受)=%.2f" % (up, down, p_accept))
+    if hours:
+        print("    开口钟点分布：", " ".join("%s点×%d" % (h, n) for h, n in sorted(hours.items())))
+    print("    最近 5 条理由：")
+    for d in dec[:5]:
+        print("      %s %-6s 料%-3s %s" % (str(d.get("ts"))[11:16], d.get("kind"), d.get("material"),
+                                            str(d.get("reason"))[:52]))
+
+
 def main():
     p = argparse.ArgumentParser(prog="hubctl", description="鲸鲸中枢命令行工具（默认只读）",
                                 add_help=True,
                                 epilog="例：hubctl status / hubctl metrics -n 20 / hubctl dump -o all.json --redact")
     sub = p.add_subparsers(dest="cmd")
 
+    it = sub.add_parser("interruption", help="打扰仪表盘：开口率/接受率/钟点分布")
+    it.add_argument("--days", type=int, default=7)
+    it.set_defaults(fn=cmd_interruption)
     sub.add_parser("status", help="总览").set_defaults(fn=cmd_status)
     td = sub.add_parser("today", help="今天一屏（屏幕/睡眠/App前五/蓝牙电量/在听）")
     td.add_argument("--day"); td.set_defaults(fn=cmd_today)

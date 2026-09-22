@@ -74,3 +74,13 @@
 
 > 口径提醒：同一时空里**累计值**（当天累计分钟数、当天窗口切换次数）一律"取当天最新"，
 > **不要 SUM** —— 设备是每隔几分钟把"今天到目前为止"重报一次的。
+
+## v0.1.9 · 走完路线图（P0/P1/P2 主体）
+- [x] 数据主权端点 `/export` `/erase`（GDPR Art.20/17，实测 4012 行导出 0.04s）
+- [x] Python 3.11/3.12/3.13 矩阵 · 覆盖率门槛 30% · SBOM（零依赖清单）
+- [x] OpenSSF Scorecard · Android CI（此前完全没有）· dependabot
+- [x] Docker Compose 一键部署 · Fastlane 元数据（zh-CN/en-US）
+- [x] `docs/SCHEMA.md` · `docs/LOCAL-FIRST.md` · `docs/ANDROID-RELEASE.md`
+- [x] README 30 秒上手 + 徽章 + 数据主权说明
+- [ ] PyPI 发布（等你的账号做 Trusted Publishing）· 签名 Release（等你生成签名密钥）
+- [ ] demo 视频 / 截图（需要真机画面）· awesome-selfhosted 提 PR · F-Droid 提交

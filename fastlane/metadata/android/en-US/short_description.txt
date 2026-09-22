@@ -1,0 +1,1 @@
+Self-hosted life-data collector: your data goes to your own server, nowhere else.

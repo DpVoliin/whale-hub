@@ -1,8 +1,27 @@
 # 鲸鲸 · 让 AI 住进你的设备里
 
+[![ci](https://github.com/DpVoliin/whale-hub/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![android](https://github.com/DpVoliin/whale-hub/actions/workflows/android.yml/badge.svg)](../../actions/workflows/android.yml)
+![python](https://img.shields.io/badge/python-3.11%2B-blue)
+![deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
+![license](https://img.shields.io/badge/license-MIT-green)
+
 > 一个"常驻、能读数据、能主动关心、能自己查、能动手"的个人助手。
 > 不是又一个聊天框 —— 是她真的知道你今天上了几节课、屏幕刷了多久、在听哪首歌、
 > 明天下不下雨，然后**挑最值得说的那一两句**来找你。
+
+## 30 秒先看见效果（不用部署）
+
+```bash
+git clone https://github.com/DpVoliin/whale-hub && cd whale-hub
+python3 hub/hub.py &                        # 起中枢：零依赖，不需要 pip / venv
+TOKEN=$(python3 -c "import json;print(json.load(open('hub.json'))['token'])")
+curl -s -H "X-Token: $TOKEN" http://127.0.0.1:11440/llm-preview | head -40
+```
+
+你会看到"她今天能看到什么"，以及**"她永远看不到什么"**（脱敏清单）。
+完整记录：`python3 hub/hubctl.py status` / `today` / `dump --redact`。
+想跑成常驻服务：`docker compose up -d`（数据挂在本机 `./data`，删容器不删数据）。
 
 ## 她长什么样
 
@@ -36,6 +55,10 @@
 **3. 数据先脱敏，再给模型**
 进模型的东西**一定**过一道关卡：通知原文 → 只留数值、App 名 → 只留分类、
 日程标题 → 只留类型、分钟级时间 → 只留小时、位置 → 只有城市级天气。
+**数据是你的，随时能拿走、能抹掉**：`GET /export`（机器可读 JSON，`?redact=1` 顺手脱敏）
+· `POST /erase`（物理删除 + VACUUM，删前自动备份）· 删掉 `hub.db` 就是彻底删除 ——
+这套系统没有云端副本，也不需要"注销账号"。详见 [`docs/SCHEMA.md`](docs/SCHEMA.md)。
+
 `GET /llm-preview` 能让你核对"模型到底看到了什么"，以及"它永远看不到什么"。
 
 **4. 不知道就去查，但查完要过筛**
@@ -61,6 +84,9 @@
 | `speaker/whale_web.py` | 联网查询与四道安全筛查 |
 | `speaker/whale_card.json` | 角色卡（character card 风格：性格/说话习惯/示例对话/禁忌）|
 | `mcu/mcu_relay.py` | 单片机中继：内网明文一行 ↔ 云上中枢 HTTPS（见 `docs/MCU.md`）|
+| `docs/SCHEMA.md` | 每张表存什么 / 留多久 / 哪些字段进过模型 |
+| `docs/LOCAL-FIRST.md` | 本地优先七项对照（含"不适用场景"）|
+| `docs/ANDROID-RELEASE.md` | 采集器发布签名与上架准备 |
 | `desktop/` | **桌面挂件**（Windows，Python + tkinter）：透明置顶角色、表情切换、气泡说话、电脑使用时长采集。**不含美术素材**（版权原因）—— 用 `tools/make_placeholder.sh` 生成占位图，或放自己的图，见 `desktop/assets/README.md` |
 | `desktop/` | **Windows 桌面挂件 + 电脑采集**（同一个 exe，零依赖）；见 `desktop/使用说明.md` |
 | `hub/src/whalehub/` | **源码真相**：按职责切成的 13 个片段（合并顺序＝文件名前缀）|

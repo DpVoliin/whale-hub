@@ -79,7 +79,8 @@ class HealthNotifListener : NotificationListenerService() {
         val ex = sbn.notification?.extras ?: return
 
         // 媒体：任何应用的媒体通知 → 顺手报一次"在听什么"（不等采集节奏）
-        if (P.healthOn && sbn.notification?.extras?.containsKey(Notification.EXTRA_MEDIA_SESSION) == true) {
+        // 注意：这里该归「曲名开关」管，不是健康开关（之前串了，关掉健康就等于把音乐也关了）
+        if (P.musicTitleOn && sbn.notification?.extras?.containsKey(Notification.EXTRA_MEDIA_SESSION) == true) {
             runCatching { Media.metric()?.let { Hub.send(this, listOf(it)) } }
         }
 

@@ -1,0 +1,20 @@
+# 依赖更新：运行时零依赖，所以这里管的是 **Actions 版本** 与开发工具
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "ci"
+    labels: ["dependencies", "ci"]
+
+  # Android 采集器（Gradle）。中枢本身零依赖，不配 pip。
+  - package-ecosystem: "gradle"
+    directory: "/collector"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "android"
+    labels: ["dependencies", "android"]
+    open-pull-requests-limit: 3

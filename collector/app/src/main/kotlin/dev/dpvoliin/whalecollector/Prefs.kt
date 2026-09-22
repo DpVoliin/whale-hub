@@ -13,8 +13,8 @@ object P {
     private const val F = "collector"
 
     // 预置好中枢地址与 token（私有自用 App，省得在手机上敲一长串；换服务器时在设置页改）
-    private const val DEFAULT_HUB = ""   // 首次启动在设置页填
-    private const val DEFAULT_TOKEN = "" // 同上
+    private const val DEFAULT_HUB = ""
+    private const val DEFAULT_TOKEN = ""
 
     var hubUrl: String
         get() {
@@ -46,8 +46,10 @@ object P {
         get() = sp().getBoolean("calendar", true)
         set(v) = sp().edit().putBoolean("calendar", v).apply()
 
+    // 健康数据（心率/血氧/压力）= GDPR 里的"特殊类别数据"，**必须默认关**，
+    // 由用户在设置页显式打开才算同意。别靠系统权限弹窗代替同意。
     var healthOn: Boolean
-        get() = sp().getBoolean("health", true)
+        get() = sp().getBoolean("health", false)
         set(v) = sp().edit().putBoolean("health", v).apply()
 
     /** 上报曲名？（关掉后只报"在听音乐"，不给歌名 —— 曲名算中等敏感）。 */
