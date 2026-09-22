@@ -41,7 +41,7 @@ jobs:
           ls -la app/build/outputs/apk/release/*.apk || echo "::warning::release 产物缺失"
 
       - name: 上传 APK（仅 PR 便于人工验收）
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: whale-collector-debug-apk
           path: collector/app/build/outputs/apk/debug/*.apk
