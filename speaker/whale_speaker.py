@@ -24,9 +24,9 @@ import ssl
 import time
 import urllib.request
 
-HUB = os.getenv("WHALE_HUB", "")          # 你的中枢地址，如 https://your-server:11443
+HUB = os.getenv("WHALE_HUB") or "https://YOUR_SERVER_IP:11443"
 CA = "/home/ubuntu/hub/tls/hub.crt"
-TOKEN = os.getenv("WHALE_TOKEN", "")       # 中枢 token（在服务器 hub.json 里）
+TOKEN = os.getenv("WHALE_TOKEN") or "YOUR_HUB_TOKEN"
 TERMINAL = "weixin"
 
 WEBHOOK_URL = "http://127.0.0.1:8644/webhooks/whale-hub"
@@ -62,7 +62,8 @@ CONFIG = pathlib.Path("/home/ubuntu/.hermes/config.yaml")
 POLL = 2.0                     # 秒：定点/紧急的响应速度
 GAP = 1.5                      # 秒：两条之间的间隔
 QUIET = (23, 7)                # 免打扰时段（小时，跨夜）
-GAP_MIN, GAP_MAX = 5 * 60, 90 * 60       # 主动说话的间隔上下限（秒）：最快 5 分钟，最慢 90 分钟
+GAP_MIN, GAP_MAX = 5 * 60, 90 * 60
+GATE_STAMP = pathlib.Path("/opt/whale/.whale_last_gate")   # 上次"评估期望效用"的时间戳（防轮询空转刷屏）       # 主动说话的间隔上下限（秒）：最快 5 分钟，最慢 90 分钟
 SAY_MAX_PER_DAY = 12                     # 每日上限（硬顶，可配置）
 SAY_MIN_PER_DAY = 4                      # 被 ✗ 打到底时的下限 —— 再少就变成"坏掉"了
 
@@ -250,6 +251,146 @@ def material_score(ctx: dict) -> tuple:
     if not (ctx.get("sleep_minutes") or ctx.get("sleep")):
         pass
     return score, why
+
+
+
+
+# ─────────────── 文献算法（P2 #31/#32）────────────────────────────────
+# 决策成本参数（可被 hub.json 覆盖）
+C_MISS = float(os.getenv("WHALE_C_MISS", "1.0"))    # 漏报的代价：该说没说，她显得没用
+C_FALSE = float(os.getenv("WHALE_C_FALSE", "2.0"))  # 误报的代价：说了但没用 → 比漏报更烦
+# Horvitz 1999：开口 iff p_accept > C_落空 / (C_落空 + C_漏报)
+UTIL_THRESHOLD = C_FALSE / (C_FALSE + C_MISS)
+
+# 各话题的 Goldilocks 时间窗（小时，闭区间；跨零点用 (start, end) 且 start > end 表示跨天）
+# 依据：arXiv:2504.09332 —— 同样的提醒放错时段，接受率差一个数量级。
+GOLDILOCKS = {
+    "sleep":    (21, 24),          # 睡点相关只在晚上说
+    "weather":  (6, 10),           # 出门带伞：早上说才有用
+    "game":     (17, 24),          # 游戏时长盘点：下午到夜里
+    "study":    (8, 22),
+    "battery":  (7, 23),
+    "default":  (7, 23),
+}
+
+
+def _load_feedback_stats():
+    """从反馈反推 p_accept（Beta 后验）。读不到就用中性先验 0.5。"""
+    ok = bad = 0
+    try:
+        d = hub("/feedback?consume=0&limit=100") or {}
+        for it in (d.get("items") or []):
+            v = str(it.get("verdict") or "")
+            if v in ("up", "1", "good", "yes"):
+                ok += 1
+            elif v in ("down", "0", "bad", "no"):
+                bad += 1
+    except Exception:
+        pass
+    return (1 + ok) / (2 + ok + bad), ok, bad          # Beta(1,1) 先验
+
+
+BANDS_CACHE = {"at": 0.0, "data": {}}
+
+
+def _band_posterior() -> dict:
+    """取"当前场景桶"的后验（中枢 /bands）。样本不足的桶由中枢标 reliable=false。"""
+    global BANDS_CACHE
+    if time.time() - BANDS_CACHE.get("at", 0) < 300 and BANDS_CACHE.get("data"):
+        return BANDS_CACHE["data"]
+    try:
+        d = hub("/bands") or {}
+        BANDS_CACHE = {"at": time.time(), "data": d}
+    except Exception:
+        pass
+    return BANDS_CACHE.get("data") or {}
+
+
+def _current_band() -> str:
+    try:
+        import whale_adapt as _wa
+        return _wa.band_key()
+    except Exception:
+        return ""
+
+
+def utility_gate(material: int) -> tuple:
+    """期望效用 gate：现在开口划不划算？返回 (是否开口, 理由)
+
+    p(接受) 优先用**当前场景桶**的后验（分桶 Thompson，EOPA arXiv:2608.04416）；
+    桶里样本不足 4 条就退回全局 —— 避免"一次运气就改阈值"。
+    """
+    p_accept, ok, bad = _load_feedback_stats()
+    _src = "全局"
+    try:
+        bd = _band_posterior()
+        band = _current_band()
+        info = (bd.get("bands") or {}).get(band) if band else None
+        if info and info.get("reliable"):
+            p_accept = float(info.get("p_accept") or p_accept)
+            _src = "桶 " + band
+    except Exception:
+        pass
+    if p_accept < UTIL_THRESHOLD:
+        # 后验偏低 → 只有"料很足"才允许开口，否则闭嘴
+        if material < 3:
+            return False, f"期望效用不够（p_接受={p_accept:.2f}[{_src}] < {UTIL_THRESHOLD:.2f}，料={material}；反馈 {ok}✓/{bad}✗）"
+        return True, f"虽然 p_接受={p_accept:.2f} 偏低，但料足（{material}）"
+    return True, f"期望效用够（p_接受={p_accept:.2f}[{_src}] ≥ {UTIL_THRESHOLD:.2f}）"
+
+
+def goldilocks_ok(kind: str, hour: int) -> bool:
+    """这条话题现在在不在它的时间窗里"""
+    a, b = GOLDILOCKS.get(kind) or GOLDILOCKS["default"]
+    if a <= b:
+        return a <= hour < b
+    return hour >= a or hour < b          # 跨零点
+
+
+def breakpoint_now(ctx: dict) -> tuple:
+    """断点投递：人刚拿起手机那一刻，是说话的最好时机。
+
+    信号：最近一条影响型上报很新（< 6 分钟）且 idle_minutes 很小（≤ 2）。
+    拿不到信号就返回 False（不假装）—— 只是不能享受"断点加成"，不影响正常判断。
+    """
+    try:
+        from datetime import datetime
+        items = (ctx.get("_raw_recent") or [])
+        idle = ctx.get("screen_idle_minutes")
+        fresh = False
+        for it in items:
+            if it.get("metric") in ("screen.active_minutes", "screen.idle_minutes"):
+                ts = it.get("ts")
+                if ts:
+                    age = (datetime.now(TZ) - datetime.fromisoformat(ts)).total_seconds() / 60
+                    fresh = age < 6
+                    break
+        if idle is not None and float(idle) <= 2 and fresh:
+            return True, f"刚拿起手机（idle={idle} 分钟，上报很新）—— 天然断点"
+    except Exception:
+        pass
+    return False, ""
+
+
+def interruption_stats(days: int = 7) -> dict:
+    """打扰仪表盘：开口次数 / 被认可比例 / 按小时分布"""
+    st = {"days": days, "said": 0, "skipped": 0, "up": 0, "down": 0, "by_hour": {}}
+    try:
+        d = hub("/decisions?limit=500") or {}
+        for it in (d.get("items") or []):
+            verdict = str(it.get("verdict") or it.get("decision") or "")
+            if "说" in verdict or "speak" in verdict.lower():
+                st["said"] += 1
+            else:
+                st["skipped"] += 1
+            ts = str(it.get("ts") or "")[11:13]
+            if ts.isdigit():
+                st["by_hour"][ts] = st["by_hour"].get(ts, 0) + 1
+    except Exception:
+        pass
+    p, ok, bad = _load_feedback_stats()
+    st["up"], st["down"], st["p_accept"] = ok, bad, round(p, 3)
+    return st
 
 
 def next_gap(ctx: dict, quiet_hint: bool = False) -> tuple:
@@ -467,6 +608,68 @@ def relay_urgent():
     return False
 
 
+def topic_kind(text: str) -> str:
+    """粗判这句话属于哪个话题（只用于 Goldilocks 时间窗检查）。"""
+    t = text or ""
+    if any(k in t for k in ("睡", "晚安", "熬夜", "早点", "休息", "收个尾")):
+        return "sleep"
+    if any(k in t for k in ("雨", "伞", "降温", "天气", "热", "冷")):
+        return "weather"
+    if any(k in t for k in ("游戏", "方舟", "打了", "排位")):
+        return "game"
+    if any(k in t for k in ("课", "上课", "作业", "复习", "考试")):
+        return "study"
+    if any(k in t for k in ("电量", "充电", "耳机", "充电宝")):
+        return "battery"
+    return "default"
+
+
+def _log_decision(kind: str, gap_sec: float, reason: str, material: int, st: dict) -> None:
+    """结构化决策日志：把"为什么这么决定"发到中枢落库（回放器靠它）。"""
+    try:
+        import whale_adapt as _wa          # band_key() 在 whale_adapt 里
+        band = _wa.band_key()
+    except Exception:
+        band = ""
+    try:
+        hub("/decision", {"kind": kind, "gap_sec": int(gap_sec), "reason": str(reason)[:180],
+                          "material": int(material), "said": int(st.get("said", 0)), "band": band})
+    except Exception as e:
+        _dbg("决策日志上报失败（不影响说话）：%s" % str(e)[:60])
+
+
+def material_of(ctx: dict) -> int:
+    """数一下今天有几件"值得说"的事 —— 期望效用 gate 的输入之一。"""
+    n = 0
+    try:
+        w = ctx.get("weather_now") or {}
+        if (w.get("rain_1h") or 0) > 0 or (w.get("desc") or "").find("雨") >= 0:
+            n += 1
+        wt = ctx.get("weather_today") or {}
+        if wt.get("tmax", 0) and wt.get("tmin", 0) and (wt["tmax"] - wt["tmin"]) >= 10:
+            n += 1
+        if ctx.get("weather_alert"):
+            n += 1
+        b = ctx.get("battery_percent")
+        if b is not None and float(b) <= 20 and not ctx.get("battery_charging"):
+            n += 1
+        for _name, info in (ctx.get("bluetooth_batteries") or {}).items():
+            if isinstance(info, dict) and (info.get("percent") or 100) <= 20:
+                n += 1
+        if int(ctx.get("screen_usage_minutes") or 0) >= 480:
+            n += 1
+        for _cat, mins in (ctx.get("screen_usage_minutes_by_category") or {}).items():
+            if int(mins or 0) >= 90:
+                n += 1
+        if (ctx.get("calendar") or []):
+            n += 1
+        if ctx.get("surprise") or ctx.get("most_notable"):
+            n += 1
+    except Exception:
+        pass
+    return n
+
+
 def maybe_speak():
     """隔一段时间，让模型自己判断：要不要跟主人说点什么（提醒 or 闲聊 or 沉默）。"""
     now = time.localtime()
@@ -488,18 +691,39 @@ def maybe_speak():
     if st.get("said", 0) >= _cap:
         _dbg(f"今天已说 {st['said']} 句（上限 {_cap}，按命中率重算）→ 只发定点/紧急")
         return
+    score = material_of(_ctx0)
     gap, why = next_gap(_ctx0)
-    if last and time.time() - last < gap:
+    # 断点投递：刚拿起手机那一刻 → 允许更早开口（人正好在看屏幕）
+    bp, bp_why = breakpoint_now(_ctx0)
+    if bp:
+        gap = int(gap * 0.6)
+        why = why + "｜" + bp_why
+    # ★ 顺序很重要：先看"到没到点"，再看"划不划算"。
+    #   反过来的话，每次轮询（2 秒）都会跑一遍期望效用判断 → 空转刷屏。
+    may_speak = (not last) or (time.time() - last >= gap)
+    if not may_speak:
+        return                                    # 没到点就静默返回：不评估、不写日志
+    # ★ 评估节流：没到点的时候不评估；但"没说过话"时 may_speak 会一直为真，
+    #   所以这里再用一个独立时间戳兜住 —— 同一个 gap 内只评估一次，不刷屏。
+    try:
+        _last_eval = float(GATE_STAMP.read_text().strip())
+    except Exception:
+        _last_eval = 0
+    if _last_eval and time.time() - _last_eval < min(gap, 600):
         return
-        # ★ 结构化决策日志：把"为什么这么决定"发到中枢落库（回放器靠它，光写文本理由回放不了）
-        try:
-            import whale_adapt as _wa          # band_key() 在 whale_adapt 里（直接写 band_key() 会 NameError）
-            hub("/decision", {"kind": "speak", "gap_sec": int(gap_sec),
-                              "reason": why[:180], "material": score,
-                              "said": st.get("said", 0), "band": _wa.band_key()})
-        except Exception as e:
-            _dbg("决策日志上报失败（不影响说话）：%s" % str(e)[:60])
-        _dbg(f"这次间隔 {int(gap_sec // 60)} 分钟（{why}）")
+    try:
+        GATE_STAMP.write_text(str(int(time.time())))
+    except Exception:
+        pass
+    # 期望效用 gate：划不划算（Horvitz 1999）—— 只在"本来可以开口"时才评估
+    allow, uw = utility_gate(score)
+    if not allow:
+        _dbg("期望效用不足 → 不说：" + uw)
+        _log_decision("silent", gap, uw + "｜料=" + str(score), score, st)
+        return
+    # 结构化决策日志（**必须在 return 之前**：之前这段写在 return 后面，成了死代码）
+    _log_decision("speak", gap, why + "｜" + uw, score, st)
+    _dbg(f"这次间隔 {int(gap // 60)} 分钟（{why}）")
 
     try:
         ctx = hub("/llm-preview").get("would_send_to_model") or {}
@@ -582,6 +806,15 @@ def maybe_speak():
     except Exception as _e:
         _dbg("事实去重跳过：%s" % str(_e)[:60])
     try:
+        # Goldilocks 时间窗（arXiv:2504.09332）：话题放错时段 = 白打扰。
+        # 例外：定点提醒/上课/紧急走的是另一条路，不受这里影响。
+        _kind = topic_kind(out)
+        _h = time.localtime().tm_hour
+        if not goldilocks_ok(_kind, _h):
+            _dbg(f"话题『{_kind}』不在时间窗（{_h} 点）→ 这次不说")
+            _log_decision("silent", 0, f"goldilocks：{_kind} 不在窗内（{_h} 点）", 0, pace())
+            return False
+
         ok, info = deliver(out)
         _dbg(f"主动说：{out[:40]}" if ok else f"主动说被拒：{info[:70]}")
         if ok:

@@ -642,12 +642,23 @@ def cmd_token(a):
     cfg["token"] = new
     with open(p, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
-    print(f"  ✓ 已轮换：{new[:6]}…{new[-4:]}")
-    print("  ⚠ 现在去改这三处，否则采集器/说话层会 401：")
+    # ★ 必须**完整**打印一次：不然用户抄不到，等于白换
+    print("  ✓ 已轮换。新 token（只显示这一次，请现在抄下来）：")
+    print(f"      {new}")
+    print("  ⚠ 要改的三处（不改就会 401）：")
     print("     · 手机采集器 → 设置页的 token")
-    print("     · 说话层环境变量 WHALE_TOKEN")
-    print("     · 任何 curl 脚本")
-    print("  中枢 1 分钟内自动热重启生效。")
+    print("     · 说话层 → 环境变量 WHALE_TOKEN / .whale_env")
+    print("     · 电脑挂件 → whale_desk.json 里的 token")
+    # ★ 改 hub.json 不会触发热重启（守护只盯 hub.py 指纹）→ 这里主动碰一下指纹文件
+    try:
+        hp = os.path.join(os.path.dirname(p), ".hubhash")
+        if os.path.exists(hp):
+            os.remove(hp)
+            print("  ✓ 已触发中枢热重启（约 1 分钟内生效，旧 token 随之失效）")
+        else:
+            print("  ⚠ 没找到 .hubhash，请手动重启中枢（systemctl restart 或 pkill -f hub.py）")
+    except Exception as e:
+        print(f"  ⚠ 触发重启失败（{type(e).__name__}），请手动重启中枢")
 
 
 def cmd_prune(a):
