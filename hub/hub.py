@@ -68,7 +68,7 @@ except OSError:
     pass
 CFG_PATH = os.path.join(BASE, "hub.json")
 DB_PATH = os.path.join(BASE, "hub.db")
-VERSION = "0.1.20"
+VERSION = "0.1.21"
 TZ = timezone(timedelta(hours=8))          # 北京时间（用户在国内，固定 +8，避免服务器 UTC 漂移）
 
 DEFAULT_CFG = {
@@ -3027,8 +3027,11 @@ def ext_loop():
 # 这里给中枢自己开**直发**通道，一台 4C4G 的机器 + 一个 webhook 就能把话说出去：
 #   · 企业微信群机器人（官方接口、无限流）—— 填 channels.wecom_webhook 即可，不需要 corpid/secret
 #   · 通用 webhook —— 任何接受 POST {"text": "..."} 的地址（自建小服务、Slack/Discord 中转等）
+#   · ntfy —— 极简自托管推送：把文本 POST 到 https://ntfy.sh/<你的主题> 即达（可自建服务端）
+#   · Bark —— iOS 极简推送：https://api.day.app/<你的key>/<内容>（可自建服务端）
 # 刻意**不**自动发：自动发会和说话层重复推送。它是个"通道"，由调用方（人 / cron / 扩展）决定何时用。
-CHANNEL_KEYS = ("wecom_webhook", "generic_webhook", "wecom_corpid", "wecom_secret", "wecom_agentid", "wecom_touser")
+CHANNEL_KEYS = ("wecom_webhook", "generic_webhook", "wecom_corpid", "wecom_secret", "wecom_agentid",
+                "wecom_touser", "ntfy_url", "ntfy_token", "bark_url", "bark_sound")
 
 
 def channels_status(cfg=None):
@@ -3039,6 +3042,8 @@ def channels_status(cfg=None):
         "generic_webhook": "已配置" if ch.get("generic_webhook") else "空",
         "wecom_app": "已配置" if all(ch.get(k) for k in ("wecom_corpid", "wecom_secret", "wecom_agentid"))
                      else "空（需要 corpid + secret + agentid）",
+        "ntfy": "已配置" if ch.get("ntfy_url") else "空（填 https://ntfy.sh/你的主题）",
+        "bark": "已配置" if ch.get("bark_url") else "空（填 https://api.day.app/你的key）",
         "note": "主出口仍是说话层→网关；这里是中枢**直发**通道，不自动使用",
     }
 
@@ -3078,8 +3083,44 @@ def channel_send(text, cfg=None):
             out["generic"] = "ok" if st == 200 else "HTTP %s" % st
         except Exception as e:
             out["generic"] = "%s: %s" % (type(e).__name__, str(e)[:60])
+    # ── ntfy：把文本**原样**POST 到主题地址（不是 JSON！这是它自己的协议）──
+    ntfy = (ch.get("ntfy_url") or "").strip()
+    if ntfy:
+        try:
+            import urllib.request
+            hdr = {"Title": ("whalecare".encode()).decode(),
+                   "Tags": "whale", "Content-Type": "text/plain; charset=utf-8"}
+            tok = (ch.get("ntfy_token") or "").strip()
+            if tok:
+                hdr["Authorization"] = "Bearer " + tok
+            req = urllib.request.Request(ntfy, data=text[:1800].encode("utf-8"), headers=hdr, method="POST")
+            with urllib.request.urlopen(req, timeout=10) as r:
+                out["ntfy"] = "ok" if r.getcode() == 200 else "HTTP %s" % r.getcode()
+        except Exception as e:
+            out["ntfy"] = "%s: %s" % (type(e).__name__, str(e)[:60])
+
+    # ── Bark：经典路径式（https://api.day.app/<key>/<标题>/<内容>?sound=xxx）──
+    bark = (ch.get("bark_url") or "").strip()
+    if bark:
+        try:
+            import urllib.parse
+            import urllib.request
+            base = bark.rstrip("/")
+            title = "whalecare"
+            seg = "%s/%s/%s" % (base, urllib.parse.quote(title), urllib.parse.quote(text[:900]))
+            snd = (ch.get("bark_sound") or "").strip()
+            if snd:
+                seg += "?sound=" + urllib.parse.quote(snd)
+            with urllib.request.urlopen(seg, timeout=10) as r:
+                body = r.read(200).decode("utf-8", "replace")
+                ok = r.getcode() == 200 and '"code":200' in body.replace(" ", "")
+                out["bark"] = "ok" if ok else ("被拒：%s" % body[:60])
+        except Exception as e:
+            out["bark"] = "%s: %s" % (type(e).__name__, str(e)[:60])
+
     if not out:
-        out["error"] = "没有配置任何直发出口（channels.wecom_webhook / generic_webhook）"
+        out["error"] = ("没有配置任何直发出口（channels.wecom_webhook / generic_webhook / "
+                        "ntfy_url / bark_url）")
     try:
         audit("channel_send", target=",".join(sorted(out)), result="ok" if "ok" in str(list(out.values())) else "error",
               note="直发一条（%d 字）" % len(text))

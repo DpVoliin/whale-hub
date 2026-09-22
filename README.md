@@ -390,3 +390,19 @@ MIT。拿去改成你自己的鲸鲸，随便。
 
 ⚠️ 这类工具会接触**通知、使用时长、健康**等敏感数据。请务必自己部署、自己掌控、
 别把中枢对公网敞开（至少 token + 防火墙白名单 + HTTPS）。
+
+## 直发出口（除微信外还能发到哪）
+
+主出口是「说话层 → 网关 webhook → 微信」。中枢另外自带**直发**通道（**不自动使用** ——
+避免和说话层重复推送，由 cron / 扩展 / 你手动调）：
+
+| 出口 | 配置键 | 说明 |
+|---|---|---|
+| 企业微信群机器人 | `channels.wecom_webhook` | 官方接口、无限流，一个地址即可 |
+| 通用 webhook | `channels.generic_webhook` | 任何接受 `POST {"text": "..."}` 的地址 |
+| 企业微信应用消息 | `channels.wecom_corpid/secret/agentid` | 可发给指定成员 |
+| **ntfy** | `channels.ntfy_url` (+`ntfy_token`) | 极简推送，文本 `POST` 到 `https://ntfy.sh/<主题>` 即达 |
+| **Bark** | `channels.bark_url` (+`bark_sound`) | iOS 极简推送，路径式 `/<key>/<标题>/<内容>` |
+
+看状态：`hubctl channels`（只报"配没配"，不打印地址本身 —— 那带密钥）。
+发测试：`POST /channels?test=1`。

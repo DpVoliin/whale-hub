@@ -1,10 +1,10 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:da1fc5dc-1d33-4c0c-b278-556c58d3877e",
+  "serialNumber": "urn:uuid:7e3c927f-ccbd-4911-b751-6784f9f5a324",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-09-22T08:36:36Z",
+    "timestamp": "2026-09-22T10:15:23Z",
     "tools": [
       {
         "vendor": "whalecare",
@@ -14,14 +14,14 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.20",
+      "bom-ref": "pkg:generic/whalecare@0.1.21",
       "name": "whalecare",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "24d9b296ea817e4ffb0a01feb12d996e55504d8e120f2384e4ed5c59fe5db64b"
+          "content": "34273c00e214c2aab76ecdcc7595d0e0eae4f8c1da3436406bcaec26948cbc94"
         }
       ],
       "properties": [
@@ -31,7 +31,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "48996f035309550a1dc3af1a3ba90e07403e5677"
+          "value": "27a61c74a927a07321c516c1928b27e839aa9ba7"
         }
       ]
     }
@@ -39,14 +39,14 @@
   "components": [
     {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.20",
+      "bom-ref": "pkg:generic/whalecare@0.1.21",
       "name": "whalecare",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "24d9b296ea817e4ffb0a01feb12d996e55504d8e120f2384e4ed5c59fe5db64b"
+          "content": "34273c00e214c2aab76ecdcc7595d0e0eae4f8c1da3436406bcaec26948cbc94"
         }
       ],
       "properties": [
@@ -56,7 +56,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "48996f035309550a1dc3af1a3ba90e07403e5677"
+          "value": "27a61c74a927a07321c516c1928b27e839aa9ba7"
         }
       ]
     },

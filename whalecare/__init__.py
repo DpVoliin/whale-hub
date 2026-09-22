@@ -14,7 +14,7 @@ from pathlib import Path
 __all__ = ["__version__", "HUB_FILE"]
 
 #: 与 CHANGELOG 首条 `## vX.Y.Z` 保持一致（有门禁盯着，别手改忘了）
-__version__ = "0.1.20"
+__version__ = "0.1.21"
 
 
 def hub_file() -> Path:
