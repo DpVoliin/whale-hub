@@ -2,6 +2,40 @@
 
 版本号只递增**第三位**（本项目是自用系统，不做对外兼容承诺）。
 
+## v0.1.17 — A 批：迁移框架 / 反馈带桶 / 策略外挂 / 直发出口（+ 工具链升级）
+
+### 新增
+- **schema 迁移框架**：`PRAGMA user_version` + 有序迁移链（`@migration`），每个迁移**幂等**、
+  **失败不让中枢起不来**；`hubctl schema` 看版本与待跑迁移，`tests/test_migrate.py` 覆盖
+  「全新库 / 老库且数据不丢 / 连跑三次 / 每个迁移重放 / 迁移数=版本号」。
+  起因就是 ctx 那次手写 `ALTER` 差点把中枢搞挂 —— 这类债不能留。
+- **反馈带上场景桶**：`/feedback` 不带桶时由中枢**按上报时刻自己算**（客户端一行都不用改），
+  分桶 Thompson 这才真能攒到样本。
+- **说话策略可外挂**：`whale_strategy.py`（或 `$WHALE_STRATEGY`）可覆盖 `next_gap` / `material_score`，
+  **返回 None 即回落内置**、按 mtime 热加载、写坏只记一行日志不影响说话；附可抄的
+  `speaker/whale_strategy.example.py`。
+- **直发出口**（不经 Hermes 网关）：企业微信群机器人（`{"msgtype":"text",...}` 形状）+ 通用 webhook；
+  `POST /push`、`POST /push/test`、`GET /channels`；出口状态**不打印 webhook 地址本身**（它带 key）。
+  `tests/test_channels.py` 用**本地桩服务器**逐字校验 payload（测试绝不往外面发东西）。
+
+### 又抓到一个"静默失效"级真 bug（靠跨模块一致性测试）
+说话层的 `band_key()` 用**机器本地时区**，而中枢的桶用**固定 +8** —— 服务器时区若不是 +8，
+两边算出的桶名会错位，桶后验永远取不到（不报错、只是悄悄退回全局）。
+实测在 UTC 下 **85% 的分钟都错位**。已把说话层改成固定 +8，并加
+`tests/test_band_consistency.py`：**一周里每一分钟**都比一遍，任何漂移当场红。
+
+### 变更（采集器工具链升级，一个任务做完）
+`AGP 8.9.2 → 9.4.1` · `Gradle 8.13 → 9.7.1` · `compileSdk/targetSdk 36 → 37` ·
+`Kotlin 2.1.20 → 2.4.20` · `core-ktx 1.17.0 → 1.19.0`
+- 这三条必须一起动：core-ktx 1.19.0 硬要求 AGP ≥ 9.1；AGP 9 要求 Gradle 9；compileSdk 要 37。
+- `kotlinOptions` 在 Kotlin 2.4 已移除 → 迁移到 `compilerOptions{jvmTarget}`。
+- 清掉 `gradle.properties` 里 AGP 9 已移除的 `android.useAndroidX` / `android.nonTransitiveRClass` /
+  `android.defaults.buildfeatures.buildconfig`（它们本就是默认值，留着会让 Kotlin 插件拒绝加载）。
+- CI 失败注解扩成「关键行 20 + 尾部 45 行原文」—— 真正的异常常藏在没命中关键词的行里。
+
+### 顺带
+- ROADMAP 标掉 3 条早已完成的（Docker / CI / 部署教程），补上本批 4 条。
+
 ## v0.1.16 — 高密度合成数据压测 + 反事实调参（外部评审要的"别凭感觉调参"）
 
 ### 新增

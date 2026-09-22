@@ -369,6 +369,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._pending(q)
         if path == "/devices":
             return self._send(200, self._devices())
+        if path == "/channels":
+            return self._send(200, channels_status())
         if path == "/remind":
             with db() as c:
                 rows = c.execute("SELECT * FROM scheduled WHERE fired_at IS NULL "
@@ -492,7 +494,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/channels":
             body = self._body()
             ch = CFG.setdefault("channels", {})
-            for k in ("wecom_webhook", "wecom_corpid", "wecom_secret", "wecom_agentid", "wecom_touser"):
+            for k in CHANNEL_KEYS:
                 if k in body:
                     ch[k] = str(body[k]).strip()
             with open(CFG_PATH, "w", encoding="utf-8") as f:
@@ -500,6 +502,16 @@ class Handler(BaseHTTPRequestHandler):
             audit("config_change", target="channels:" + ",".join(sorted(body)[:8]),
                   actor=self._client(), note="改了出口字段 %d 个" % len(body))
             return self._send(200, {"ok": True, "channels": {k: ("已设置" if v else "空") for k, v in ch.items()}})
+        if path == "/push":
+            # 直发一条到已配置出口（企业微信群机器人 / 通用 webhook），不经 Hermes 网关
+            b = self._body() or {}
+            text = str(b.get("text") or "").strip()
+            if not text:
+                return self._send(400, {"ok": False, "error": "要传 {text}"})
+            return self._send(200, {"ok": True, "result": channel_send(text),
+                                    "channels": channels_status()})
+        if path == "/push/test":
+            return self._send(200, {"ok": True, "result": channel_test(), "channels": channels_status()})
         if path == "/push/register":
             body = self._body()
             name, url = (body.get("name") or "").strip(), (body.get("url") or "").strip()

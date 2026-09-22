@@ -48,6 +48,20 @@ curl -X POST -H "X-Token: $TOKEN" -H 'Content-Type: application/json' \
 > 命令行等价物：`hubctl dump --redact --encrypt` / `hubctl prune`。
 > **"删掉 `hub.db` 就是彻底删除"** —— 这套系统没有云端副本，也不需要"注销账号"。
 
+## 迁移策略（v0.1.17 起是框架，不是土办法）
+
+版本号存在 **`PRAGMA user_version`**；迁移是 `hub/src/whalecare/10_core.py` 里的**有序函数列表**
+（`@migration` 装饰器，注册顺序 = 版本顺序），`init_db()` 启动时自动补跑，`hubctl schema` 可查。
+
+三条硬规矩（都是被现实咬出来的）：
+
+1. **每个迁移必须幂等** —— 老库 `user_version=0` 但表已存在，会被当成"从头跑一遍"；
+   不幂等（比如裸 `ALTER ADD COLUMN`）就会在第 N 次启动时炸。
+   *踩过*：ctx 那次 `ALTER` 写在 `executescript` 里 → 第二次启动 `duplicate column name`
+   → **整个 init_db 中断**，它**之后**的建表语句全部没执行（`terminals` 没建成 → `/today` 断连）。
+2. **迁移失败不许把中枢带崩** —— 自用系统先保证可用：报出来、停在上一版、`hubctl schema` 能看出落点。
+3. **测试要覆盖"老库"与"连跑两次"** —— 见 `tests/test_migrate.py`（全新库 / 老库且数据不丢 / 幂等 / 迁移数=版本号）。
+
 ## 迁移策略
 
 现在**没有**迁移框架：改表结构时用 `ALTER TABLE ... ADD COLUMN`（向后兼容），

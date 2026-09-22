@@ -54,10 +54,16 @@
       AGP 9 又要求 Gradle 9，所以**单独合任何一个都会红**。升级时要同步三处：
       ① CI 里钉的 `gradle-version`（现在 8.13，因为 runner 自带的 9.7.1 与 AGP 8.9.2 不兼容）
       ② `compileSdk` ③ 真机回归一遍采集器（健康开关/通知监听那几条门禁最容易在升级后错位）
+- [x] **schema 迁移框架**：`PRAGMA user_version` + 有序迁移链，每个迁移幂等、失败不让中枢起不来；
+      `hubctl schema` 看版本/待跑迁移（起因：ctx 那次手写 ALTER 差点把中枢搞挂）（v0.1.17）
+- [x] **反馈带上场景桶**：`/feedback` 无桶时由中枢按上报时刻算 → 分桶 Thompson 才真能攒到样本（v0.1.17）
+- [x] **说话策略可外挂**：`whale_strategy.py` 覆盖 `next_gap`/`material_score`，返回 None 即回落内置，
+      热加载、写坏不影响说话；见 `speaker/whale_strategy.example.py`（v0.1.17）
+- [x] **更多出口（直发通道）**：企业微信群机器人 + 通用 webhook；`POST /push` `POST /push/test`（v0.1.17）
 - [ ] **macOS 采集器**：窗口切换、开机时长、前台 App 分类（契约与 `/ingest` 一致）
-- [ ] **可选 Docker 部署**：`deploy/Dockerfile` 作为附属方案（主线仍是"一个文件 + 一条命令"）
-- [ ] **CI**：推送时跑编译 + 结构断言 + 回归测试（复用仓库里已有的检查脚本）
-- [ ] **部署教程补齐**：界面截图、常见报错对照表、安卓权限授予图文步骤
+- [x] **可选 Docker 部署**：`Dockerfile` + `docker-compose.yml`（主线仍是"一个文件 + 一条命令"）
+- [x] **CI**：ci / android / scorecard 三条工作流（合并断言 + 产物等价 + 脱敏回归 + 53 个测试 + 零依赖 + ruff + 覆盖率 + SBOM）
+- [x] **部署教程补齐**：`docs/DEPLOY-GUIDE.md`（权限逐条 + 常见报错对照表）
 - [ ] **手表真实健康数据**：依赖厂商健康 App 推通知（四级降级：Health Connect → 通知监听 → 无障碍 → 截图 OCR 兜底）
 - [ ] **手机上跑 agent**：Termux + proot 里跑本仓库（Python/Linux 程序，理论可搬）
 - [ ] **更多出口**：企业微信（官方接口无限流）、Telegram、Discord

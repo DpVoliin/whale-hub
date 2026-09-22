@@ -68,7 +68,7 @@ except OSError:
     pass
 CFG_PATH = os.path.join(BASE, "hub.json")
 DB_PATH = os.path.join(BASE, "hub.db")
-VERSION = "0.1.16"
+VERSION = "0.1.17"
 TZ = timezone(timedelta(hours=8))          # 北京时间（用户在国内，固定 +8，避免服务器 UTC 漂移）
 
 DEFAULT_CFG = {
@@ -119,6 +119,8 @@ DEFAULT_CFG = {
         "wecom_secret": "",
         "wecom_agentid": "",
         "wecom_touser": "@all",
+        # 通用出口：任何接受 POST {"text": "..."} 的地址（自建转发服务 / Slack-Discord 中转）
+        "generic_webhook": "",
     },
     "privacy": {
         # 哪些分类**值得拿出来说**（其余如 学习/办公/工具/其他 一律不提）

@@ -82,6 +82,8 @@ curl -s -H "X-Token: $TOKEN" http://127.0.0.1:11440/llm-preview | head -40
 |---|---|
 | `hub/hub.py` | 中枢：单文件 Python（零第三方依赖），HTTP + SQLite + 规则引擎 + 脱敏 + 定点提醒 |
 | `hub/hubctl.py` | 命令行工具：读数据 / 只读 SQL / 导出（可脱敏）/ 合并导入 / 备份还原 / **审计 `audit`** / **配对码 `pair`** |
+| `hub/src/whalecare/93_channels.py` | **直发出口**：企业微信群机器人 + 通用 webhook（`POST /push`，不经 Hermes 网关） |
+| `speaker/whale_strategy.example.py` | **说话策略外挂**：复制成 `whale_strategy.py` 即可替换节奏与料分 |
 | `GET /`（管理台） | **Web 管理台**：标准库 HTML，零前端依赖。看数据源健康度/决策/审计，改开关与人设，生成配对码。与 API **同一套 token** |
 | `hub/hub_install.sh` | 部署脚本：只放文件 + 写 cron，靠**文件指纹变化热重启**（永不需 kill 进程）|
 | `collector/` | Android 采集器（Kotlin）：屏幕用量、日程、健康通知、媒体会话、电量/闹钟；频率自适应 |
