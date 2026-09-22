@@ -114,7 +114,7 @@ curl -s -H "X-Token: $TOKEN" http://127.0.0.1:11440/llm-preview | head -40
 | `hub/ext/` | **外挂扩展**：放一个 .py 就多一个数据源（契约与示例见 `docs/EXTENSIONS.md`）|
 | `tests/` | 脱敏回归测试集（换模型/改 prompt 都跑一遍）|
 | `docs/adr/` | **架构决策记录**：每个大决定 200 字（为什么选、为什么没选另一个）|
-| `.github/workflows/` | CI 三条：`ci`（合并+结构断言+产物等价+64 测试+零依赖+ruff+脱敏回归+SBOM）· `android`（Gradle 9.7.1 + AGP 9.4.1 出包，失败会把 Gradle 报错摘成注解）· `scorecard` |
+| `.github/workflows/` | CI 三条：`ci`（合并+结构断言+产物等价+151 测试+零依赖+ruff 双门禁+脱敏回归+SBOM+版本一致性门禁）· `android`（Gradle 9.7.1 + AGP 9.4.1 出包，失败会把 Gradle 报错摘成注解）· `scorecard` |
 | `docs/ARCHITECTURE.md` | **架构与设计取舍**（含「哪些机制是被真故障咬出来的」）|
 | `docs/DEPLOY-GUIDE.md` | 部署教程：权限逐条 + 常见报错对照表 |
 | `docs/DEMO-SCRIPT.md` | 演示脚本（录视频/给别人看时照着走）|

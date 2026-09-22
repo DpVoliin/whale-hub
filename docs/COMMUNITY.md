@@ -46,7 +46,8 @@
 - **优先级建议**：`PRIVACY.md` → `ARCHITECTURE.md` → `SCHEMA.md` → `DEPLOY-GUIDE.md`（这四份对外最有用）
 - **验收**：与中文原文逐节对应、不增删技术结论；专有名词保持一致（见文末词表）
 
-### 6. 更多出口通道（飞书 / Bark / ntfy）　`help wanted`
+### 6. 飞书（Lark）直发出口　`help wanted`
+> ntfy / Bark / 钉钉 / Discord / QQ（官方机器人 API）已在 v0.1.21 / v0.1.22 落地；这条只剩飞书（官方接口要 app id/secret + 租户授权，Hermes 的 `feishu-platform` 插件也能覆盖）。
 - **证据**：`hub/src/whalecare/93_channels.py` 已把"出口"抽成一层，但只接了少量通道
 - **做什么**：照现有通道的样子加一个（含失败重试与限流）
 - **验收**：加一个测试证明"通道失败不阻塞其他通道"；文档补一节
