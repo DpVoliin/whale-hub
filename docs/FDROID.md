@@ -11,7 +11,7 @@
 | 无专有依赖 / 无 GMS | ✅ | 只用 `androidx.core` + `androidx.appcompat` |
 | 元数据齐 | ✅ `fastlane/metadata/android/zh-CN/`（title / short_description / full_description / changelogs）| |
 | 隐私政策可达 | ✅ `docs/PRIVACY.md` | |
-| 可复现构建 | ⚠️ 未做 | 需固定依赖版本 + 记录 SDK/Build-Tools 版本（见下）|
+| 可复现构建 | ⚠️ 部分 | 版本已记录在 `ANDROID-RELEASE.md` 的"构建环境基线"；依赖锁定文件待生成 |
 | **`Tethered Network Services` anti-feature** | ⚠️ **会被标** | 见第二节 —— 这是最容易被拒/被标红的一条 |
 
 ## 二、最容易踩的一条：Tethered Network Services

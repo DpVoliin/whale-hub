@@ -14,7 +14,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="鲸鲸采集器"
+            android:text="@string/app_name"
             android:textColor="@color/text_primary"
             android:textSize="20sp"
             android:textStyle="bold" />
@@ -23,7 +23,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="把手机数据自动送到中枢，中枢再决定什么时候提醒你"
+            android:text="@string/subtitle"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
@@ -31,7 +31,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
-            android:text="中枢地址"
+            android:text="@string/label_hub_url"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
@@ -67,7 +67,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            android:text="设备名（中枢用它区分数据来源）"
+            android:text="@string/label_device_name"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
@@ -86,7 +86,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
-            android:text="采集使用时长（屏幕/各 App）"
+            android:text="@string/switch_usage"
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
@@ -95,7 +95,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="采集日程（系统日历）"
+            android:text="@string/switch_calendar"
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
@@ -104,7 +104,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="采集健康通知（心率/血氧/压力/睡眠）— 敏感数据，默认关；打开即表示你同意采集"
+            android:text="@string/switch_health"
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
@@ -113,7 +113,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="上报曲名（关掉就只说「在听音乐」，不给歌名）"
+            android:text="@string/switch_music"
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
@@ -122,7 +122,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="采集订单/快递（只报类型与金额区间，不留商品名）"
+            android:text="@string/switch_orders"
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
@@ -131,20 +131,20 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="保存并启动采集" />
+            android:text="@string/btn_save_start" />
 
         <Button
             android:id="@+id/btnSyncNow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="立即同步一次" />
+            android:text="@string/btn_sync_now" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="授权（缺哪个点哪个）"
+            android:text="@string/section_permissions"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
@@ -153,35 +153,35 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="① 通知监听（健康数据靠它）" />
+            android:text="@string/btn_perm_notif" />
 
         <Button
             android:id="@+id/btnUsageAccess"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="② 使用情况访问" />
+            android:text="@string/btn_perm_usage" />
 
         <Button
             android:id="@+id/btnCalendarPerm"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="③ 日历读取权限" />
+            android:text="@string/btn_perm_calendar" />
 
         <Button
             android:id="@+id/btnImportTt"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="导入课表（选岛课表导出的 JSON）" />
+            android:text="@string/btn_import_timetable" />
 
         <Button
             android:id="@+id/btnStop"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="停止采集" />
+            android:text="@string/btn_stop" />
 
         <TextView
             android:id="@+id/tvStatus"

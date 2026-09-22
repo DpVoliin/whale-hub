@@ -6,6 +6,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![python 3.11+](https://img.shields.io/badge/python-3.11%2B-informational.svg)](pyproject.toml)
 [![zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](pyproject.toml)
+[![pypi](https://img.shields.io/pypi/v/whalecare.svg)](https://pypi.org/project/whalecare/)
 
 Whalecare is a **proactive** personal agent: it watches the data you already generate
 (phone screen time, sleep, schedule, PC activity, orders, battery…), keeps it in **your own
@@ -84,7 +85,8 @@ Then open `http://127.0.0.1:11440/llm-preview` — that's what the model would s
 (see [`docs/DEPLOY-GUIDE.md`](docs/DEPLOY-GUIDE.md), Chinese).
 
 Prefer a container? `docker compose up -d` (data stays in `./data`).
-Prefer pip? `pip install whalecare && whalecare` — same single-file hub, just wrapped.
+Prefer pip? **`pip install whalecare && whalecare`** — published on PyPI, zero dependencies;
+the package is a thin shell that just locates and runs the same single-file hub.
 
 Optional pieces: `hubctl.py` (CLI: status/stats/dump/restore/doctor/token/…),
 `speaker/` (the "decides when to talk" layer, needs an LLM API key),

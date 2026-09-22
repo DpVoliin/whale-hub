@@ -47,7 +47,7 @@ cd collector
 | 无专有依赖 / 无 GMS | ✅ 只用 androidx 基础库 |
 | 隐私政策 | ✅ `docs/PRIVACY.md` |
 | 不允许"只能连自家服务器" | ⚠️ **注意**：F-Droid 会把它标成 `Tethered Network Services` anti-feature —— 采集器已支持**自定义服务器地址**（设置页可填），请在上架说明里写明"可自建" |
-| 可复现构建 | ⚠️ 未做（需要固定依赖版本 + 记录构建环境）|
+| 可复现构建 | ✅ 已记录版本（见下方"构建环境基线"）· 依赖锁定待办 |
 
 ## 五、密钥丢了怎么办
 
@@ -72,3 +72,28 @@ python3 collector/tools/check_apk.py <你的.apk> --host <你的IP>:11443
 **为什么写进流程**：这件事真发生过 —— 把公开仓库源码编的包当私包发了出去，
 公开仓库里那些值是占位符（不能把你的 IP/口令写进公开库），装上去就是「没有地址 + 认不出证书」，
 上报全挂、数据在手机上排队。这类错**长得和正常包一模一样**，只能靠发之前读包里那几处值比一遍。
+
+## 构建环境基线（2026-09-22 实测能出包的那套）
+
+| 组件 | 版本 | 备注 |
+|---|---|---|
+| JDK | **17.0.20**（OpenJDK） | AGP 9.x 要求 JDK 17+ |
+| Gradle | **8.11.1** | 仓库不带 wrapper 时用系统 gradle |
+| Android Gradle Plugin | **9.4.1** | AGP 9 **内置 Kotlin**，不再 apply `kotlin.android` |
+| compileSdk / targetSdk | **37** | |
+| minSdk | **26** | Android 8.0 |
+| Build-Tools | **36.0.0**（35.0.0 也在） | |
+| 产物 | `:app:assembleDebug` → 3.59 MB · `:app:assembleRelease` → 未签名 2.74 MB | CI 的 android 任务同样跑这两个 |
+
+**一次能复现的命令**（与 CI 一致）：
+```bash
+java -version                      # 期望 17.x
+gradle --version                   # 期望 8.11.x
+gradle :app:assembleDebug          # 产物 app/build/outputs/apk/debug/app-debug.apk
+```
+
+**还差的半步（想继续做就照这个来）**：依赖版本目前写在
+`collector/gradle/libs.versions.toml` 里但**没有锁定文件** ——
+在有网环境执行一次 `gradle --write-verification-metadata sha256 help` 与
+`gradle dependencies --write-locks`，把生成的 `gradle/verification-metadata.xml`
+与 `*.lockfile` 一起提交，即可从"记录了版本"升级到"依赖字节级可复现"。

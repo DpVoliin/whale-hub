@@ -1,4 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- 界面文案集中在这里：改文案只动本文件；values-en/ 是英文版 -->
     <string name="app_name">鲸鲸采集器</string>
+    <string name="subtitle">把手机数据自动送到中枢，中枢再决定什么时候提醒你</string>
+    <string name="label_hub_url">中枢地址</string>
+    <string name="label_device_name">设备名（中枢用它区分数据来源）</string>
+    <string name="switch_usage">采集使用时长（屏幕/各 App）</string>
+    <string name="switch_calendar">采集日程（系统日历）</string>
+    <string name="switch_health">采集健康通知（心率/血氧/压力/睡眠）— 敏感数据，默认关；打开即表示你同意采集</string>
+    <string name="switch_music">上报曲名（关掉就只说「在听音乐」，不给歌名）</string>
+    <string name="switch_orders">采集订单/快递（只报类型与金额区间，不留商品名）</string>
+    <string name="btn_save_start">保存并启动采集</string>
+    <string name="btn_sync_now">立即同步一次</string>
+    <string name="section_permissions">授权（缺哪个点哪个）</string>
+    <string name="btn_perm_notif">① 通知监听（健康数据靠它）</string>
+    <string name="btn_perm_usage">② 使用情况访问</string>
+    <string name="btn_perm_calendar">③ 日历读取权限</string>
+    <string name="btn_import_timetable">导入课表（选岛课表导出的 JSON）</string>
+    <string name="btn_stop">停止采集</string>
 </resources>

@@ -1,3 +1,27 @@
+## v0.1.20 — 发布到 PyPI · 补齐 5 项工程欠账
+
+### 发布
+- **`pip install whalecare` 正式可用**（PyPI 上线 0.1.19/0.1.20，零运行时依赖）。
+  包壳 `whalecare/` 只做"定位并执行那份单文件中枢"，不改一行逻辑；
+  `.github/workflows/publish.yml` 走 Trusted Publishing（仓库不存任何 API token），
+  并在发布前强制校验：版本一致性 + 片段与产物逐字节等价 + wheel 内含 hub.py + 无依赖声明。
+  实测：`pip install whalecare` → `whalecare` 命令真的把中枢跑起来了。
+
+### 工程欠账（对应 5 个 issue，做完即关闭）
+- **`/health` 的接口列表不再手抄**：新增 `tests/test_health_endpoint_list.py` ——
+  从源码扫出真实路由（精确 + 前缀两种写法）与 `/health` 列表**双向比对**，
+  还带一条"故意注入假路由必须能抓到"的反向验证。**首次运行就抓出列表漏了 22 条真实路由**
+  （`/memory` `/remind` `/review` `/timetable/today` `/channels` `/feedback` …），已补齐 16 → 38 条。
+- **日期边界测试**：`tests/test_date_edge_cases.py` —— 生成器跑满 400 天（跨年）后日期键自洽、
+  一年前的值绝不落进"上期"、区间两端闭区间、闰日 `YYYY-02-29` 正确参与筛选与聚合、
+  未来日期不污染基线。
+- **构建可复现**：`docs/ANDROID-RELEASE.md` 记录实测能出包的完整基线
+  （JDK 17.0.20 · Gradle 8.11.1 · AGP 9.4.1 · compileSdk/targetSdk 37 · minSdk 26 · build-tools 36.0.0）
+  + 依赖锁定的具体命令；`docs/FDROID.md` 同步状态。
+- **采集器双语界面**：17 处硬编码中文抽成字符串资源，新增 `values-en/strings.xml`；
+  系统语言为英文时界面显示英文，中文仍为默认。已用 `:app:assembleDebug` 编译验证通过。
+- **文档英译起步**：`docs/PRIVACY.en.md`（隐私设计全文），术语按 `docs/COMMUNITY.md` 词表统一。
+
 ## v0.1.19 — 设备下行口（结论留档：硬件方向短期不做）
 
 > **结论**：接口可行、已端到端验证，但**短期不做硬件**（STM32 小屏 + 语音模块）。

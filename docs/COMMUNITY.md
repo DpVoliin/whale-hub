@@ -24,27 +24,20 @@
 
 ---
 
-## 二、可以认领的任务（都带证据与验收标准）
+## 二、已完成（结论留档，不必再提）
+
+| 原任务 | 结论 |
+|---|---|
+| `/health` 接口列表自动化 | ✅ 已做：`tests/test_health_endpoint_list.py`，**首跑就抓出漏了 22 条真实路由**（16→38 条），并带"注入假路由必须能抓到"的反向验证 |
+| 日期边界（跨年 / 闰日） | ✅ 已做：`tests/test_date_edge_cases.py`（400 天生成器实跑 + 区间闭区间 + 未来日期不污染基线）|
+| 构建可复现（记录版本） | ✅ 版本已记入 `ANDROID-RELEASE.md`；依赖锁定文件待有网环境生成一次 |
+| 采集器英文界面 | ✅ 17 处硬编码中文已抽成资源 + `values-en/`，编译验证通过 |
+| 文档英译（起步） | ✅ `docs/PRIVACY.en.md` 已完成；其余文档仍欢迎认领 |
+
+## 二·五、可以认领的任务（都带证据与验收标准）
 
 > 认领方式：在对应 issue 下留言即可；没有 issue 就自己开一个，标题照抄下表。
 > 每个任务都**不需要你读懂整个系统**，改完跑 `python3 -m unittest discover tests` 就好。
-
-### 1. 固定 Android 依赖版本，让构建可复现　`good first issue`
-- **证据**：`docs/ANDROID-RELEASE.md:50` 与 `docs/FDROID.md:14` 都写着"可复现构建 ⚠️ 未做"
-- **做什么**：记录当前能构建成功的 JDK / Gradle / SDK / Build-Tools 版本到上面那两份文档；
-  用 Gradle 的 dependency locking（或 version catalog + 明确版本）固定依赖
-- **验收**：文档里版本齐全；CI 的 android 任务仍然绿；半年后另一个人按文档能构建出功能等价的包
-
-### 2. 让 `/health` 的接口列表不再"靠手抄"　`good first issue`
-- **证据**：这个列表是手写的，2026-09-22 就已经漏过 7 个端点（新增 `/export` `/erase` `/bands` `/decisions` `/mcu/inbox` …之后没同步）
-- **做什么**：加一个测试，扫 `hub/src/whalecare/97_http.py` 里 `do_GET` / `do_POST` 实际注册的路由，
-  断言 `/health` 里那份列表**包含**全部实际路由
-- **验收**：故意往代码里加一个新路由（不同步列表）→ 测试变红；撤回 → 变绿
-
-### 3. 采集器英文界面　`good first issue`
-- **证据**：`collector/app/src/main/res/` 下只有 `values/strings.xml`（全中文）
-- **做什么**：加 `values-en/strings.xml`，把界面字符串翻译过去；中文仍作默认
-- **验收**：把手机系统语言切成英文，App 界面与权限说明都显示英文；中文系统下不变
 
 ### 4. 文档英译（**按文件认领，一份一个 issue**）　`good first issue`
 - **证据**：`docs/` 下的技术文档全部是中文（14 份；本文件除外）
@@ -52,12 +45,6 @@
   `> English translation of <原名>. 中文原文以 <原名> 为准。`
 - **优先级建议**：`PRIVACY.md` → `ARCHITECTURE.md` → `SCHEMA.md` → `DEPLOY-GUIDE.md`（这四份对外最有用）
 - **验收**：与中文原文逐节对应、不增删技术结论；专有名词保持一致（见文末词表）
-
-### 5. 合成历史生成器：补"跨年"与"闰年 2/29"　`good first issue`
-- **证据**：`tests/make_fake_history.py` 已覆盖 8 类坑（残缺日/整段缺两周/全同值/10 倍突变/跨零点跨月/时区偏移/App 改名/超长静默），
-  但**没有跨年与闰年**
-- **做什么**：加两个场景 + 断言（跨年时周复盘不能把一年前的数据算进上期；2/29 的日序列不能错位）
-- **验收**：新场景能在 `--days 400` 下跑通并断言通过
 
 ### 6. 更多出口通道（飞书 / Bark / ntfy）　`help wanted`
 - **证据**：`hub/src/whalecare/93_channels.py` 已把"出口"抽成一层，但只接了少量通道

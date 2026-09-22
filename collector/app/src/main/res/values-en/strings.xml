@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- English UI. Missing entries fall back to values/strings.xml -->
+    <string name="app_name">Whale Collector</string>
+    <string name="subtitle">Sends phone data to your hub; the hub decides when to remind you</string>
+    <string name="label_hub_url">Hub URL</string>
+    <string name="label_device_name">Device name (the hub uses it to tell data sources apart)</string>
+    <string name="switch_usage">Collect screen time (screen / per-app)</string>
+    <string name="switch_calendar">Collect calendar (system calendar)</string>
+    <string name="switch_health">Collect health notifications (heart rate / SpO2 / stress / sleep) — sensitive data, OFF by default; turning it on means you consent</string>
+    <string name="switch_music">Report track titles (if off, only \"listening to music\" is sent, no song names)</string>
+    <string name="switch_orders">Collect orders/parcels (type and price range only — no product names)</string>
+    <string name="btn_save_start">Save and start collecting</string>
+    <string name="btn_sync_now">Sync once now</string>
+    <string name="section_permissions">Permissions (tap whichever is missing)</string>
+    <string name="btn_perm_notif">1. Notification access (health data needs it)</string>
+    <string name="btn_perm_usage">2. Usage access</string>
+    <string name="btn_perm_calendar">3. Calendar read permission</string>
+    <string name="btn_import_timetable">Import timetable (pick the JSON exported by the island timetable app)</string>
+    <string name="btn_stop">Stop collecting</string>
+</resources>

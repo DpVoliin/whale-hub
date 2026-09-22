@@ -7,6 +7,7 @@ your own SQLite, and *she* decides when it's worth speaking up (pushes to WeChat
 runtime dependency, local-first, auditable). 自托管 · 本地优先 · 零依赖 · 可审计。
 
 [![ci](https://github.com/DpVoliin/whalecare/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![pypi](https://img.shields.io/pypi/v/whalecare.svg)](https://pypi.org/project/whalecare/)
 [![android](https://github.com/DpVoliin/whalecare/actions/workflows/android.yml/badge.svg)](../../actions/workflows/android.yml)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
@@ -18,6 +19,13 @@ runtime dependency, local-first, auditable). 自托管 · 本地优先 · 零依
 
 ## 30 秒先看见效果（不用部署）
 
+**最短路径（已发布到 PyPI ✓ 零依赖 ✓）**：
+```bash
+pip install whalecare && whalecare
+```
+> 装出来的就是那份单文件中枢本身（包壳只做定位与转发，不改一行逻辑）。
+
+**从源码跑**：
 ```bash
 git clone https://github.com/DpVoliin/whalecare && cd whalecare
 python3 hub/hub.py &                        # 起中枢：零依赖，不需要 pip / venv

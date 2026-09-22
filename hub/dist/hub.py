@@ -68,7 +68,7 @@ except OSError:
     pass
 CFG_PATH = os.path.join(BASE, "hub.json")
 DB_PATH = os.path.join(BASE, "hub.db")
-VERSION = "0.1.19"
+VERSION = "0.1.20"
 TZ = timezone(timedelta(hours=8))          # 北京时间（用户在国内，固定 +8，避免服务器 UTC 漂移）
 
 DEFAULT_CFG = {
@@ -3887,8 +3887,44 @@ class Handler(BaseHTTPRequestHandler):
                 "code": code_fingerprint(),
                 "rules": {"class_remind_minutes": _r.get("class_remind_minutes"),
                           "sit_continuous_minutes": _r.get("sit_continuous_minutes")},
-                "uptime_note": "hub 在跑", "endpoints": ["/ingest", "/today", "/pending", "/persona",
-                                                         "/devices", "/metrics", "/ack", "/chat", "/health", "/mcu/inbox", "/mcu/ack", "/export", "/erase", "/bands", "/decisions", "/api/mcu"]}
+                "uptime_note": "hub 在跑", "endpoints": ["/ack",
+                                                         "/api/mcu",
+                                                         "/api/pair",
+                                                         "/audit",
+                                                         "/bands",
+                                                         "/brief",
+                                                         "/channels",
+                                                         "/chat",
+                                                         "/dash",
+                                                         "/decision",
+                                                         "/decisions",
+                                                         "/devices",
+                                                         "/erase",
+                                                         "/export",
+                                                         "/ext",
+                                                         "/feedback",
+                                                         "/health",
+                                                         "/ingest",
+                                                         "/llm-preview",
+                                                         "/mcu/ack",
+                                                         "/mcu/inbox",
+                                                         "/memory",
+                                                         "/metrics",
+                                                         "/pending",
+                                                         "/persona",
+                                                         "/persona/card",
+                                                         "/personas",
+                                                         "/push",
+                                                         "/push/register",
+                                                         "/push/test",
+                                                         "/question",
+                                                         "/remind",
+                                                         "/review",
+                                                         "/timetable",
+                                                         "/timetable/next",
+                                                         "/timetable/today",
+                                                         "/today",
+                                                         "/看数据"]}
 
     def _ingest(self, body):
         ok, skipped = ingest_items(body)

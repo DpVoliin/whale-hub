@@ -1,10 +1,10 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:b89746f2-b667-4bb3-8a5f-0c1127f39755",
+  "serialNumber": "urn:uuid:da1fc5dc-1d33-4c0c-b278-556c58d3877e",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-09-22T07:39:37Z",
+    "timestamp": "2026-09-22T08:36:36Z",
     "tools": [
       {
         "vendor": "whalecare",
@@ -14,14 +14,14 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.19",
+      "bom-ref": "pkg:generic/whalecare@0.1.20",
       "name": "whalecare",
-      "version": "0.1.19",
+      "version": "0.1.20",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "715685bbdb6cbeb2c1b1ff05d4612636f9e4ed28393d0c46d960249bf129aa97"
+          "content": "24d9b296ea817e4ffb0a01feb12d996e55504d8e120f2384e4ed5c59fe5db64b"
         }
       ],
       "properties": [
@@ -31,7 +31,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "affaaa6b8c0f377676ce86401454e25af853600f"
+          "value": "48996f035309550a1dc3af1a3ba90e07403e5677"
         }
       ]
     }
@@ -39,14 +39,14 @@
   "components": [
     {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.19",
+      "bom-ref": "pkg:generic/whalecare@0.1.20",
       "name": "whalecare",
-      "version": "0.1.19",
+      "version": "0.1.20",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "715685bbdb6cbeb2c1b1ff05d4612636f9e4ed28393d0c46d960249bf129aa97"
+          "content": "24d9b296ea817e4ffb0a01feb12d996e55504d8e120f2384e4ed5c59fe5db64b"
         }
       ],
       "properties": [
@@ -56,7 +56,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "affaaa6b8c0f377676ce86401454e25af853600f"
+          "value": "48996f035309550a1dc3af1a3ba90e07403e5677"
         }
       ]
     },
