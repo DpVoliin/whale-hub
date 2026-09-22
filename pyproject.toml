@@ -45,7 +45,9 @@ line-length = 120
 target-version = "py311"
 # ★ 为什么排除 hub/src：
 #   那里的 13 个 .py 是**片段**，不是可独立导入的模块（彼此引用全局，例如 97_http 用 10_core 的 db()），
-#   单独 lint 必然刷出上百个 F821「未定义名」假阳性（实测 645 处）。
+#   单独 lint 必然刷出几百个 F821「未定义名」假阳性（实测 662 处，2026-09-22）。
+#   想直接 lint 片段就用 `hub/src/whalecare/ruff.toml`（见 `ruff check hub/src/whalecare/`），
+#   那份配置只关跨片段的假阳性，保留其余真错误 —— 与产物那一步是**两个分工的门禁**。
 #   片段由 build_single.py 的「逐片段语法校验 + 结构断言 + 与产物逐字节等价」把关；
 #   真正要 lint 的是**产物** hub/hub.py —— 它是完整模块，那 645 个假阳性消失，
 #   而且能抓到只有跨片段才暴露的真 bug（例：缺 import pathlib，见 2026-09-22 那次修复）。

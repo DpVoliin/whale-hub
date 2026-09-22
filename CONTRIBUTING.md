@@ -9,24 +9,39 @@
 鲸鲸的中枢是「**片段源码 → 合并成单文件**」的结构。这是刻意的设计（见 `docs/adr/`），不是历史包袱。
 
 ```
-hub/src/whalecare/          ← 你改这里（13 个片段，数字前缀 = 合并顺序）
+hub/src/whalecare/          ← 你改这里（15 个片段，数字前缀 = 合并顺序）
   ├── 00_header.py          导入与常量
   ├── 10_core.py            数据库与核心工具
   ├── 20_timetable.py       课表
   ├── 30_rules.py           规则引擎
-  ├── 40_privacy.py         脱敏
+  ├── 40_privacy.py         脱敏与分类
   ├── 50_weather.py         天气
-  ├── 60_analysis.py        统计与异常检测 ← 最常改的
+  ├── 60_analysis.py        统计与异常检测   ← 最常改的
   ├── 70_care.py            主动关心逻辑
   ├── 80_persona.py         人设包
   ├── 90_ext.py             扩展层
+  ├── 93_channels.py        出口通道
   ├── 95_scheduler.py       定时任务
   ├── 97_http.py            HTTP 端点
+  ├── 98_admin.py           管理/状态页
   └── 99_main.py            入口
-
-hub/hub.py                 ← 生成产物（3,388 行），**必须提交**
+                      │
+                      │  hub/tools/build_single.py   ← 机械合并（按文件名前缀排序）
+                      ▼
+hub/hub.py                 ← 生成产物（约 4,400 行），**必须提交**
 hub/dist/hub.py            ← 合并中间产物，**不进 git**
 ```
+
+### 两个 lint 门禁（有意的分工，别合并）
+
+| 对象 | 命令 | 规则 | 说明 |
+|---|---|---|---|
+| **产物** `hub/hub.py` | `ruff check .` | 根 `pyproject.toml`，**严格** | CI 强制。它是完整模块，能抓到只有跨片段才暴露的真 bug（例：缺 `import pathlib`）|
+| **片段** `hub/src/whalecare/` | `ruff check hub/src/whalecare/` | 片段自己的 `ruff.toml` | 片段不可独立导入（彼此靠全局变量通信），单文件会刷 **662 处** F821 假阳性；这份配置只关掉跨片段假阳性，保留其余真错误 |
+
+> 新人最常见的两个坑：① 只改片段不重新合并 → CI 的"逐字节等价"必红；
+> ② 用错门禁去看片段（`ruff check hub/src/whalecare/` 缺了 `--config` 那套）→ 误以为代码质量很差。
+> 两者都有明确命令，照着上面这张表走就行。
 
 ### 改代码的正确姿势
 

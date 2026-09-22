@@ -58,8 +58,12 @@ jobs:
         run: python3 hub/tools/check_no_deps.py
 
       # 6) lint（开发依赖，不进运行时）
-      - name: ruff
+      #    两步是**有意的分工**：产物是完整模块 → 严格；片段不可独立导入 → 用片段专用配置，
+      #    只关掉跨片段的假阳性（F821 等），保留其余真错误。
+      - name: ruff（产物 · 严格）
         run: pip install ruff==0.6.* && ruff check .
+      - name: ruff（片段 · 专用配置）
+        run: ruff check hub/src/whalecare/
 
       # 7) 覆盖率（coverage 是**开发**依赖，不违反“运行时零依赖”；门槛 30%，只涨不降）
       - name: 覆盖率

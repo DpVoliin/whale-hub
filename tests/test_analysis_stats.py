@@ -545,7 +545,6 @@ class CategoryAndOutputsTest(unittest.TestCase):
           · 新实现按 `day, pkg|app` 分组 → 1 组，取值由 `ORDER BY ts DESC` 确定 → 永远取最新。
 
         所以这条测的是"结果确定"，不是"某个具体 bug 已复现"（不夸大）。"""
-        import sqlite3 as _s
         with self.h.db() as c:
             c.execute("DELETE FROM metrics WHERE device='vary_probe'")
             # ★ 故意让**插入顺序与时间顺序相反**：先插 ts 较晚、值 20 的那条。
