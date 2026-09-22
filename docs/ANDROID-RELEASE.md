@@ -86,6 +86,10 @@ python3 collector/tools/check_apk.py <你的.apk> --host <你的IP>:11443
 | SDK 平台 | **platforms;android-36** | 必须已安装，否则同上报错 |
 | 产物 | `:app:assembleDebug` → 3.59 MB · `:app:assembleRelease` → 未签名 2.74 MB | CI 的 android 任务同样跑这两个 |
 
+**首次构建需要联网**：依赖（androidx / kotlin-stdlib 等）要从 Maven 拉一次；
+拉齐之后可以 `gradle --offline :app:assembleDebug`（2026-09-22 实测：离线缓存里没有
+`kotlin-stdlib:2.0.21` 时，离线构建会停在 `Could not resolve ... for offline mode`）。
+
 **一次能复现的命令**（与 CI 一致）：
 ```bash
 java -version                      # 期望 17.x
