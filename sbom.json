@@ -1,10 +1,10 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:4abb5816-8a50-49c9-bfe6-9b7dbfa455cd",
+  "serialNumber": "urn:uuid:2dfbadfb-9ac9-41fe-9e8b-cf9636d6596f",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-09-22T00:35:48Z",
+    "timestamp": "2026-09-22T02:43:11Z",
     "tools": [
       {
         "vendor": "whale-hub",
@@ -14,14 +14,14 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/whale-hub@0.1.0",
+      "bom-ref": "pkg:generic/whale-hub@0.1.13",
       "name": "whale-hub",
-      "version": "0.1.0",
+      "version": "0.1.13",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "6bd507290cbf3d40d58e188b7974be44bfa9ccdd49d69ece97a5fcdb1931c977"
+          "content": "a4e6f0c6fc09288e6d15db291a1009bbd1db864a07c22ccf7c54100c04e95731"
         }
       ],
       "properties": [
@@ -31,7 +31,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "df7f4673c4db578a1d9a80179ce7d6f9b207396a"
+          "value": "de90489c6947cc0fe5202f6840c1814df32098af"
         }
       ]
     }
@@ -39,14 +39,14 @@
   "components": [
     {
       "type": "application",
-      "bom-ref": "pkg:generic/whale-hub@0.1.0",
+      "bom-ref": "pkg:generic/whale-hub@0.1.13",
       "name": "whale-hub",
-      "version": "0.1.0",
+      "version": "0.1.13",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "6bd507290cbf3d40d58e188b7974be44bfa9ccdd49d69ece97a5fcdb1931c977"
+          "content": "a4e6f0c6fc09288e6d15db291a1009bbd1db864a07c22ccf7c54100c04e95731"
         }
       ],
       "properties": [
@@ -56,7 +56,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "df7f4673c4db578a1d9a80179ce7d6f9b207396a"
+          "value": "de90489c6947cc0fe5202f6840c1814df32098af"
         }
       ]
     },

@@ -97,7 +97,8 @@ def _ok_query(q: str) -> bool:
 
 def _host(url: str) -> str:
     try:
-        return urllib.parse.urlparse(url).netloc.lower().lstrip("www.")
+        # ★ 别用 lstrip("www.")：它按**字符集**剥，会把 "www.weibo.com" 剥成 "eibo.com"
+        return re.sub(r"^www\.", "", urllib.parse.urlparse(url).netloc.lower())
     except Exception:
         return ""
 

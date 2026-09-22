@@ -118,12 +118,34 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _client(self):
+        return self.client_address[0]
+
+    def _cookie_sess(self):
+        """管理页的会话 cookie（值 = HMAC(token)）。**只给浏览器用**；API 仍然只认 header。"""
+        raw = self.headers.get("Cookie") or ""
+        for part in raw.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "whale_admin":
+                return v.strip()
+        return ""
+
+    def _switch(self):
+        """当前请求的接口路径（审计用；不含 query，免得把参数写进日志）。"""
+        return (self.path or "").split("?")[0][:80]
+
     def _auth(self, q):
         # 只认 header 里的 X-Token：?token= 会进服务器日志、也会留在浏览器历史/代理记录里
         tok = self.headers.get("X-Token") or ""
         if not tok and (q.get("token") or [""])[0]:
             print(f"[warn] {self.client_address[0]} 试图用 query 里的 token（已拒绝）", flush=True)
-        if tok != CFG["token"]:
+            audit("auth_fail", target=self._switch(), actor=self._client(),
+                  result="denied", note="试图用 query 传 token")
+        ok = (tok == CFG["token"]) or (bool(self._cookie_sess()) and self._cookie_sess() == admin_session())
+        if not ok:
+            # ★ 审计：鉴权失败只记「谁 + 打哪个接口 + 结果」，不记他发了什么内容
+            audit("auth_fail", target=self._switch(), actor=self._client(),
+                  result="denied", note="token 不匹配" if tok else "没带 token")
             self._send(401, {"error": "token 不对"})   # ⚠️ 别把服务端路径写进报错（安全自测抓到：路径泄露）
             return False
         return True
@@ -167,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
             def _jsonable(v):
                 """SQLite 行里可能有 bytes（BLOB）→ 转成可 JSON 序列化的形式。"""
                 if isinstance(v, (bytes, bytearray, memoryview)):
-                    import base64 as _b64          # 局部导入：不依赖文件顶部的导入顺序
+                    import base64 as _b64  # 局部导入：不依赖文件顶部的导入顺序
                     return _b64.b64encode(bytes(v)).decode("ascii")
                 return v
 
@@ -244,15 +266,26 @@ class Handler(BaseHTTPRequestHandler):
         #   回一行纯文本 ok / err:xxx —— 单片机不用解析 JSON
         if self.path.startswith("/api/mcu"):
             return self._mcu(urlparse(self.path).query)
+        if self.path.startswith("/api/pair"):
+            return self._pair(urlparse(self.path).query)     # 设备友好：换回来是一行纯文本
 
         u = urlparse(self.path)
         path, q = u.path, parse_qs(u.query)
-        if path in ("/", "/index.html"):
-            return self._page()
+        # ★ 下面三条**在鉴权之前**：登录页本身不能要求已登录
+        if path == "/login":
+            return self._login(q)
+        if path == "/logout":
+            return self._logout()
+        if path in ("/", "/index.html", "/admin"):
+            return self._admin_page(q)
         if path == "/health":
             return self._send(200, self._health())
         if not self._auth(q):
             return
+        if path == "/audit":
+            lim = min(500, int((q.get("limit") or ["100"])[0] or 100))
+            return self._send(200, {"stats": audit_stats(),
+                                    "items": audit_recent(lim, (q.get("action") or [""])[0] or None)})
         if path == "/ext":
             return self._send(200, {
                 "dir": EXT_DIR,
@@ -265,6 +298,8 @@ class Handler(BaseHTTPRequestHandler):
                 "note": "外挂扩展：加一个文件就多一个数据源，中枢核心不需要改；扩展报错不影响主流程",
             })
         if path == "/export":
+            audit("export", target="redact=%s" % (1 if (q.get("redact") or ["0"])[0] == "1" else 0),
+                  actor=self._client(), note="全量导出（GDPR Art.20）")
             return self._export(q)
         if path == "/today":
             return self._today(q)
@@ -285,6 +320,11 @@ class Handler(BaseHTTPRequestHandler):
             with db() as c:
                 rows = c.execute("SELECT * FROM decisions ORDER BY id DESC LIMIT ?", (lim,)).fetchall()
             return self._send(200, {"count": len(rows), "items": [dict(r) for r in rows]})
+        if path == "/bands":
+            # ★ 这里原来是**只挂在 do_POST** 的：说话层用 GET 调（它无 body 时就走 GET），
+            #   于是永远 404 → 分桶后验静默失效、一直退回全局后验（今天才查出来）。
+            #   读类接口就该 GET；POST 那份保留，向后兼容已有调用方。
+            return self._send(200, band_stats())
         if path == "/memory":
             qq = (q.get("q") or [""])[0]
             return self._send(200, {"q": qq, "items": episode_search(qq) if qq else episodes_recent()})
@@ -355,6 +395,11 @@ class Handler(BaseHTTPRequestHandler):
             _n = 0
         if _n > MAX_BODY:
             return self._send(413, {"error": f"请求太大，上限 {MAX_BODY // 1024}KB"})
+        # 登录/管理台要在鉴权之前（登录本身就是"还没登录"时做的）
+        if path == "/login":
+            return self._login_post()
+        if path == "/admin":
+            return self._admin_post(q)
         if not self._auth(q):
             return
         if path == "/bands":
@@ -371,7 +416,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(500, {"ok": False, "error": "%s: %s" % (type(e).__name__, str(e)[:80])})
         if path == "/erase":
-            return self._erase(self._body())
+            b = self._body()
+            b = b if isinstance(b, dict) else {}
+            _ok = (b.get("confirm") == "ERASE-ALL")
+            audit("erase", target=str(b.get("scope") or "all"), actor=self._client(),
+                  result="ok" if _ok else "denied",
+                  note="已执行物理删除" if _ok else "缺 confirm，已拒绝")
+            return self._erase(b)
         if path == "/ingest":
             return self._ingest(self._body())
         if path == "/timetable":
@@ -402,6 +453,8 @@ class Handler(BaseHTTPRequestHandler):
                 CFG["persona"].update(body)
                 with open(CFG_PATH, "w", encoding="utf-8") as f:
                     json.dump(CFG, f, ensure_ascii=False, indent=2)
+                audit("config_change", target="persona:" + ",".join(sorted(body)[:8]),
+                      actor=self._client(), note="改了人设字段 %d 个" % len(body))
                 return self._send(200, {"ok": True, "persona": CFG["persona"]})
             return self._send(400, {"error": "body 要是一个对象"})
         if path == "/brief":
@@ -427,6 +480,8 @@ class Handler(BaseHTTPRequestHandler):
                     ch[k] = str(body[k]).strip()
             with open(CFG_PATH, "w", encoding="utf-8") as f:
                 json.dump(CFG, f, ensure_ascii=False, indent=2)
+            audit("config_change", target="channels:" + ",".join(sorted(body)[:8]),
+                  actor=self._client(), note="改了出口字段 %d 个" % len(body))
             return self._send(200, {"ok": True, "channels": {k: ("已设置" if v else "空") for k, v in ch.items()}})
         if path == "/push/register":
             body = self._body()
@@ -466,6 +521,8 @@ class Handler(BaseHTTPRequestHandler):
                 cur = c.execute("INSERT INTO scheduled(at_iso, text, daily, created_at) VALUES (?,?,?,?)",
                                 (t.isoformat(), text, daily, now_iso()))
                 rid = cur.lastrowid
+            audit("config_change", target="scheduled#%s" % rid, actor=self._client(),
+                  note="定点 %s%s" % (at, "（每天）" if daily else ""))
             return self._send(200, {"ok": True, "id": rid, "at": t.isoformat(),
                                     "daily": bool(daily), "text": text})
         if path == "/chat":
@@ -489,6 +546,8 @@ class Handler(BaseHTTPRequestHandler):
         mcu_tok = (CFG.get("mcu") or {}).get("token") or CFG["token"]
         if tok not in (CFG["token"], mcu_tok):
             print(f"[mcu] {self.client_address[0]} token 不对", flush=True)
+            audit("auth_fail", target="/api/mcu", actor=self._client(),
+                  result="denied", note="单片机 token 不对")
             return self._send_text(401, "err:token")
         dev = (g("d") or "").strip()
         # ⑤ 可选的校验和与序号（单片机稳一点）：
@@ -520,7 +579,7 @@ class Handler(BaseHTTPRequestHandler):
             _m = {"seq": seq} if seq else {}
             items.append({"device": dev, "metric": m, "value": num if isinstance(num, (int, float)) else None,
                           "unit": unit, "source": "mcu", "meta": _m})
-        print(f"[mcu] {dev} ← " + " ".join(f"{m}={v}" for m, v in zip(metrics, vals)), flush=True)
+        print(f"[mcu] {dev} ← " + " ".join(f"{m}={v}" for m, v in zip(metrics, vals, strict=False)), flush=True)
         # 直接复用 /ingest 的入库逻辑（它自己会回响应 —— 单片机只看 HTTP 200 就够了）
         return self._ingest(items)
 
@@ -633,37 +692,90 @@ class Handler(BaseHTTPRequestHandler):
             c.execute("INSERT INTO chats(ts, terminal, role, text) VALUES (?,?,?,?)", (now_iso(), term, "persona", reply))
         return self._send(200, {"ok": True, "reply": reply, "persona": p})
 
-    def _page(self):
-        """极简状态页：浏览器打开就能看今天（也算是又一个终端）。"""
-        try:
-            with db() as c:
-                rem = c.execute("SELECT * FROM reminders WHERE day=? ORDER BY id DESC LIMIT 10",
-                                (today_str(),)).fetchall()
-                devs = c.execute("SELECT device, MAX(ts) last, COUNT(*) n FROM metrics GROUP BY device").fetchall()
-        except Exception:
-            rem, devs = [], []
-        p = CFG["persona"]
-        try:
-            _c = courses_on(datetime.now(TZ).date())
-        except Exception:
-            _c = []
-        cls = "".join(f"<li>{c['start']}–{c['end']} <b>{c['name']}</b> {c['room']}</li>" for c in _c) \
-            or "<li class=muted>当天没有课（或还没同步课表）</li>"
-        rows = "".join(
-            f"<li><b>{r['level']}</b> {r['text'].replace(chr(10), '<br>')}</li>" for r in rem) or "<li>今天还没有提醒</li>"
-        dvs = "".join(f"<tr><td>{d['device']}</td><td>{d['last']}</td><td>{d['n']}</td></tr>" for d in devs) \
-            or "<tr><td colspan=3>还没有任何设备上报</td></tr>"
-        html = f"""<!doctype html><meta charset=utf-8><title>hub · {p['name']}</title>
-<style>body{{font:14px/1.7 -apple-system,"PingFang SC",sans-serif;background:#0d0e10;color:#e6e6e6;padding:24px;max-width:760px;margin:auto}}
-h1{{font-size:18px}} .muted{{color:#8b9099}} li{{margin:6px 0}} table{{border-collapse:collapse;width:100%}}
-td,th{{border-bottom:1px solid #2a2e34;padding:6px 4px;text-align:left;font-size:13px}}</style>
-<h1>{p['name']} · 中枢状态</h1>
-<p class=muted>v{VERSION} · {now_iso()} · 数据只存在这台服务器上</p>
-<h3>今天课程</h3><ul>{cls}</ul>
-<h3>今天的提醒</h3><ul>{rows}</ul>
-<h3>数据源（各设备最近上报）</h3><table><tr><th>设备</th><th>最近</th><th>条数</th></tr>{dvs}</table>
-<p class=muted>给 AI 的数据已脱敏（<a href="/llm-preview">看会发给模型的内容</a>（需带 X-Token 请求头访问））：不含通知原文 / 日程标题 / App 名 / 分钟级时间</p>
-<p class=muted>接口：POST /ingest ｜ GET /today ｜ GET /pending ｜ GET /persona ｜ GET /devices（都要 token）</p>"""
-        return self._send(200, html.replace("", CFG["token"]), "text/html; charset=utf-8")
+    # ---------------------------------------------------------------- 一次性配对（MCU/新设备）
+    def _pair(self, query):
+        """设备友好的一次性配对：GET /api/pair?c=码&d=设备名 → **第一行就是 token**（或 err:xxx）。
 
+        为什么回纯文本：单片机不用解析 JSON，一行 strtok 就够。
+        码是**一次性**的 —— 换过即废，所以设备侧该存下来的是 token，不是码。
+        """
+        q = parse_qs(query)
+        g = lambda k: (q.get(k) or [""])[0]
+        code = g("c") or g("code")
+        dev = g("d") or g("device") or "mcu"
+        ok, res = pair_claim(code, dev, actor=self._client())
+        if not ok:
+            return self._send_text(400, "err:" + str(res.get("err")))
+        print(f"[pair] {dev} 用一次性码换到 token", flush=True)
+        return self._send_text(200, res["token"])
 
+    # ---------------------------------------------------------------- 管理台（登录 / 会话）
+    def _logged_in(self, q):
+        return ((self.headers.get("X-Token") or "") == CFG["token"]
+                or (self._cookie_sess() != "" and self._cookie_sess() == admin_session()))
+
+    def _login(self, q):
+        if self._logged_in(q):
+            return self._admin_page(q)
+        return self._send(200, login_html(CFG["persona"]["name"]), "text/html; charset=utf-8")
+
+    def _logout(self):
+        audit("logout", actor=self._client(), note="退出管理台")
+        self.send_response(303)
+        self.send_header("Set-Cookie", "whale_admin=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+        self.send_header("Location", "/login")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _login_post(self):
+        form = self._form()
+        tok = str(form.get("token") or self.headers.get("X-Token") or "")
+        if tok != CFG["token"]:
+            audit("login", actor=self._client(), result="denied", note="口令不对")
+            return self._send(401, login_html(CFG["persona"]["name"], "口令不对，再试一次"),
+                              "text/html; charset=utf-8")
+        audit("login", actor=self._client(), note="登录管理台")
+        self.send_response(303)
+        self.send_header("Set-Cookie",
+                         "whale_admin=%s; Path=/; HttpOnly; SameSite=Strict" % admin_session())
+        self.send_header("Location", "/admin")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _form(self):
+        """解析表单体（浏览器 <form> 用 urlencoded；也容忍 JSON）。不引任何前端框架。"""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except Exception:
+            n = 0
+        if not n:
+            return {}
+        raw = self.rfile.read(min(n, MAX_BODY)).decode("utf-8", "replace")
+        if "json" in (self.headers.get("Content-Type") or "").lower():
+            try:
+                d = json.loads(raw)
+                return d if isinstance(d, dict) else {}
+            except Exception:
+                return {}
+        return {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
+
+    def _admin_page(self, q):
+        """★ 这里原来是**免鉴权**的极简状态页（公网谁都能看到今天的提醒与设备名）。
+
+        现在：没登录只给登录页；登录后是管理台（同一套 token，不额外造一套权限）。
+        """
+        if not self._logged_in(q):
+            audit("auth_fail", target="/admin", actor=self._client(),
+                  result="denied", note="未登录访问管理台")
+            return self._send(401, login_html(CFG["persona"]["name"]), "text/html; charset=utf-8")
+        return self._send(200, admin_html(), "text/html; charset=utf-8")
+
+    def _admin_post(self, q):
+        if not self._auth(q):
+            return
+        form = self._form()
+        ok, msg = admin_apply(form, actor=self._client())
+        audit("config_change", target=str(form.get("section") or "admin")[:40],
+              actor=self._client(), result="ok" if ok else "denied", note=str(msg)[:100])
+        return self._send(200 if ok else 400, admin_html(flash=msg, ok=ok),
+                          "text/html; charset=utf-8")

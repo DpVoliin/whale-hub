@@ -486,7 +486,7 @@ def llm_context(day=None):
 
     with db() as c:
         # 睡眠（30 分钟粒度 + 小时级时间）
-        for metric, label in (("sleep.total_minutes", "睡眠"),):
+        for metric, _label in (("sleep.total_minutes", "睡眠"),):
             m = _latest_metric(c, metric)
             if m and m.get("value") is not None:
                 ctx["sleep"] = {"minutes_rounded": blur_minutes(m["value"]), "at": hour_only(m["ts"])}

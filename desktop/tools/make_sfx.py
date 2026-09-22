@@ -76,7 +76,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     for name, gen in (("sfx_duck.wav", duck), ("sfx_pop.wav", pop)):
         p = os.path.join(OUT, name)
-        dur = write_wav(p, gen())
+        write_wav(p, gen())      # 写出文件（返回值时长这里不用）
         sz = os.path.getsize(p)
         # 读回自检：采样率/声道/时长/峰值
         with wave.open(p, "rb") as w:

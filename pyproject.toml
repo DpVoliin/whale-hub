@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whalehub"
-version = "0.1.6"
+version = "0.1.13"
 description = "鲸鲸 · 自托管的个人数据中枢：常驻、能读你自己的数据、能主动关心"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -43,10 +43,28 @@ py-modules = []
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-# 单人项目里 ruff 最大的价值：统一你自己三个月前后的写法
-lint.select = ["E", "F", "W", "I", "UP", "B"]
-lint.ignore = ["E501"]          # 长行由 line-length 管，不重复报
-exclude = ["hub/dist", "hub/hub.py"]   # hub.py 是**生成产物**，不对它 lint
+# ★ 为什么排除 hub/src：
+#   那里的 13 个 .py 是**片段**，不是可独立导入的模块（彼此引用全局，例如 97_http 用 10_core 的 db()），
+#   单独 lint 必然刷出上百个 F821「未定义名」假阳性（实测 645 处）。
+#   片段由 build_single.py 的「逐片段语法校验 + 结构断言 + 与产物逐字节等价」把关；
+#   真正要 lint 的是**产物** hub/hub.py —— 它是完整模块，那 645 个假阳性消失，
+#   而且能抓到只有跨片段才暴露的真 bug（例：缺 import pathlib，见 2026-09-22 那次修复）。
+extend-exclude = ["hub/src", "hub/dist"]
+
+[tool.ruff.lint]
+# 单人项目里 ruff 最大的价值：统一你自己三个月前后的写法 + 抓真错误（未用变量/未定义名/裸 except…）
+# ★ 刻意不选 "UP"：那组 pyupgrade 规则要求把全库刻意的 %-格式化（194 处）改成 f-string、
+#   把 `# -*- coding: utf-8 -*-` 头（31 处）删掉、把 isinstance 改 PEP604 —— 纯风格翻新，
+#   零收益，还会动到"必须逐字节等价"的合并产物。
+select = ["E", "F", "W", "I", "B"]
+ignore = [
+    "E501",   # 长行交给 line-length 管，不重复报
+    "E702",   # 分号连写多语句：紧凑工具代码刻意这么写
+    "E731",   # lambda 赋值：短工具函数这么写更清楚
+    "E741",   # 单字母 l/I/O：循环与数学场景更贴近原意
+    "E402",   # import 不在文件顶部：片段拼接结构使然（合并后顺序由文件名前缀决定）
+    "E401",   # 一行 import 多个：同上
+]
 
 [tool.ruff.format]
 quote-style = "preserve"

@@ -18,11 +18,13 @@ import hmac
 import json
 import os
 import pathlib
-import random
 import re
 import ssl
 import time
 import urllib.request
+from datetime import datetime, timedelta, timezone
+
+TZ = timezone(timedelta(hours=8))
 
 HUB = os.getenv("WHALE_HUB") or "https://YOUR_SERVER_IP:11443"
 CA = "/home/ubuntu/hub/tls/hub.crt"
@@ -396,7 +398,6 @@ def interruption_stats(days: int = 7) -> dict:
 def next_gap(ctx: dict, quiet_hint: bool = False) -> tuple:
     """算"下次说话至少等多久"。返回 (秒, 理由)。"""
     st = pace()
-    h = time.localtime().tm_hour
     t = time.localtime().tm_hour * 60 + time.localtime().tm_min
 
     # ① 时间带基线
@@ -429,9 +430,7 @@ def next_gap(ctx: dict, quiet_hint: bool = False) -> tuple:
         with op.open(req, timeout=6) as r:
             items = (json.loads(r.read().decode()) or {}).get("items") or []
         if items:
-            import datetime as _dt
-            age = (_dt.datetime.now(_dt.timezone(_dt.timedelta(hours=8)))
-                   - _dt.datetime.fromisoformat(items[0]["ts"])).total_seconds() / 60
+            age = (datetime.now(TZ) - datetime.fromisoformat(items[0]["ts"])).total_seconds() / 60
             if age <= 15:
                 base *= 0.8; why.append("你刚在用手机")
             elif age >= 120:
@@ -627,7 +626,7 @@ def topic_kind(text: str) -> str:
 def _log_decision(kind: str, gap_sec: float, reason: str, material: int, st: dict) -> None:
     """结构化决策日志：把"为什么这么决定"发到中枢落库（回放器靠它）。"""
     try:
-        import whale_adapt as _wa          # band_key() 在 whale_adapt 里
+        import whale_adapt as _wa  # band_key() 在 whale_adapt 里
         band = _wa.band_key()
     except Exception:
         band = ""

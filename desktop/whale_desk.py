@@ -37,11 +37,10 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
-
 import tkinter as tk
 import tkinter.font as tkfont
+import urllib.error
+import urllib.request
 
 APP = "鲸鲸 · 桌面"
 VERSION = "0.1.0"
@@ -1610,7 +1609,7 @@ class Widget(object):
             cy = ty + rh // 2                     # 行内垂直居中
             rx = x + BPAD_X
             inner = bw - BPAD_X * 2
-            total = self._row_width(mods)
+            _total = self._row_width(mods)   # 只为触发行宽计算
             for i, m in enumerate(mods):
                 if i:
                     rx += 12

@@ -18,17 +18,18 @@
 """
 import json
 import os
+import pathlib
 import re
 import secrets
-import sys
-import ssl
 import sqlite3
+import ssl
 import statistics
+import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 
 def _resolve_home() -> str:
@@ -67,7 +68,7 @@ except OSError:
     pass
 CFG_PATH = os.path.join(BASE, "hub.json")
 DB_PATH = os.path.join(BASE, "hub.db")
-VERSION = "0.1.0"
+VERSION = "0.1.13"
 TZ = timezone(timedelta(hours=8))          # 北京时间（用户在国内，固定 +8，避免服务器 UTC 漂移）
 
 DEFAULT_CFG = {

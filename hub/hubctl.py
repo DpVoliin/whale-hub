@@ -645,6 +645,7 @@ def cmd_token(a):
     # ★ 必须**完整**打印一次：不然用户抄不到，等于白换
     print("  ✓ 已轮换。新 token（只显示这一次，请现在抄下来）：")
     print(f"      {new}")
+    _audit_row("token_rotate", target="hub.json", note="token 已轮换（旧 token 随后失效）")
     print("  ⚠ 要改的三处（不改就会 401）：")
     print("     · 手机采集器 → 设置页的 token")
     print("     · 说话层 → 环境变量 WHALE_TOKEN / .whale_env")
@@ -735,15 +736,18 @@ def cmd_decrypt(a):
 def cmd_interruption(a):
     """打扰仪表盘：多久说一次、被认可多少、都在哪些钟点说（文献里的"打扰预算"落地）"""
     import collections
-    days = getattr(a, "days", 7)
+    days = max(1, int(getattr(a, "days", 7) or 7))
+    since = (datetime.now(TZ) - timedelta(days=days)).strftime("%Y-%m-%d")
     with db() as c:
         try:
             dec = [dict(r) for r in c.execute(
-                "SELECT ts, kind, gap_sec, material, reason, band FROM decisions ORDER BY id DESC LIMIT 800")]
+                "SELECT ts, kind, gap_sec, material, reason, band FROM decisions "
+                "WHERE ts >= ? ORDER BY id DESC LIMIT 800", (since,))]
         except Exception:
             dec = []
         try:
-            fb = [dict(r) for r in c.execute("SELECT ts, verdict FROM feedback ORDER BY id DESC LIMIT 400")]
+            fb = [dict(r) for r in c.execute("SELECT ts, verdict FROM feedback "
+                                            "WHERE ts >= ? ORDER BY id DESC LIMIT 400", (since,))]
         except Exception:
             fb = []
     said = sum(1 for d in dec if d.get("kind") in ("speak", "said"))
@@ -761,6 +765,92 @@ def cmd_interruption(a):
     for d in dec[:5]:
         print("      %s %-6s 料%-3s %s" % (str(d.get("ts"))[11:16], d.get("kind"), d.get("material"),
                                             str(d.get("reason"))[:52]))
+
+
+def _audit_row(action, target="", actor="hubctl", result="ok", note=""):
+    """从 CLI 侧补一条审计（表不存在就静默跳过 —— 旧库升级前也能用）。"""
+    try:
+        c = db()
+        if not has(c, "audit"):
+            return
+        now = datetime.now(TZ).replace(microsecond=0)
+        c.execute("INSERT INTO audit(ts, day, action, target, actor, result, note) VALUES (?,?,?,?,?,?,?)",
+                  (now.isoformat(), now.strftime("%Y-%m-%d"), str(action)[:32], str(target)[:120],
+                   str(actor)[:64], str(result)[:16], str(note)[:120]))
+        c.commit()
+    except Exception:
+        pass
+
+
+def cmd_audit(a):
+    """看审计日志 —— 只记「动作 + 对象 + 结果」，**不记数据内容**（所以能放心直接看/外发）。"""
+    c = db()
+    if not has(c, "audit"):
+        hr("审计日志")
+        print("  还没有 audit 表（中枢是旧版）—— 升级 hub.py 后重启一次会自动建表并开始记录")
+        return
+    where, args = ["1=1"], []
+    if a.action:
+        where.append("action=?")
+        args.append(a.action)
+    if a.day:
+        where.append("day=?")
+        args.append(a.day)
+    if a.stats or a.limit == 0:
+        since = (datetime.now(TZ) - timedelta(days=a.days)).strftime("%Y-%m-%d")
+        hr("审计汇总（近 %d 天）" % a.days)
+        tot = 0
+        for r in c.execute("SELECT action, COUNT(*) n, SUM(result='denied') d FROM audit "
+                           "WHERE day>=? GROUP BY action ORDER BY n DESC", (since,)):
+            tot += r["n"]
+            print("  %-16s %5d 条%s" % (r["action"], r["n"], ("（其中被拒 %d）" % r["d"]) if r["d"] else ""))
+        print("  %-16s %5d 条" % ("合计", tot))
+        if a.stats and a.limit == 0:
+            return
+    rows = c.execute("SELECT * FROM audit WHERE %s ORDER BY id DESC LIMIT ?" % " AND ".join(where),
+                     (*args, a.limit or 40)).fetchall()
+    hr("最近 %d 条" % len(rows))
+    for r in rows:
+        flag = "" if r["result"] == "ok" else ("  ⚠" if r["result"] == "denied" else "  ✗")
+        print("  %s  %-15s %-24s %s%s" %
+              (fmt_ts(r["ts"])[5:16], r["action"], (r["target"] or "-")[:24], r["note"] or "", flag))
+    if not rows:
+        print("  （空）")
+    print("\n  注：审计只记动作与对象，不含通知原文/数值/坐标；表在 hub.db 里，可 hubctl sql 自己查。")
+
+
+ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"      # 去掉 0/O/1/I/L（会读错）
+
+
+def cmd_pair(a):
+    """生成一次性配对码（给 MCU 中继 / 新设备换 token），或看最近的码。"""
+    c = db()
+    if not has(c, "pair_codes"):
+        sys.exit("中枢是旧版（没有 pair_codes 表）—— 先升级 hub.py 并重启一次再跑")
+    now = datetime.now(TZ).replace(microsecond=0)
+    if a.list:
+        hr("最近的配对码（只显示前 4 位 —— 码本身就是凭据）")
+        for r in c.execute("SELECT * FROM pair_codes ORDER BY created_at DESC LIMIT ?", (a.limit,)):
+            state = ("已用 用者=%s" % (r["used_by"] or "?") if r["used_at"]
+                     else ("已过期" if r["expires_at"] < now.isoformat() else "待用"))
+            print("  %s**  绑定=%-14s %s  %s" % (r["code"][:4], r["device"] or "(任意)", state,
+                                                fmt_ts(r["created_at"])))
+        return
+    import secrets as _s
+    code = "-".join("".join(_s.choice(ALPHABET) for _ in range(4)) for _ in range(2))
+    exp = now + timedelta(minutes=max(1, a.ttl))
+    c.execute("DELETE FROM pair_codes WHERE used_at IS NULL AND expires_at < ?", (now.isoformat(),))
+    c.execute("INSERT INTO pair_codes(code, device, created_at, expires_at) VALUES (?,?,?,?)",
+              (code, (a.device or "")[:40], now.isoformat(), exp.isoformat()))
+    c.commit()
+    _audit_row("pair_new", target=(a.device or "(任意设备)"), note="CLI 生成配对码（%d 分钟）" % a.ttl)
+    hr("一次性配对码（%d 分钟内有效，**只能用一次**）" % a.ttl)
+    print("      %s" % code)
+    print("\n  给中继用（推荐）：")
+    print("      python3 mcu_relay.py --pair %s --device %s" % (code, a.device or "mcu"))
+    print("  或让设备/单片机直接问中枢：")
+    print("      curl -sk 'https://<中枢>:11443/api/pair?c=%s&d=%s'" % (code, a.device or "mcu"))
+    print("\n  提醒：换到的 token 会写进中继的 WHALE_TOKEN_FILE（默认 /tmp/mcu_relay_token，权限 600）。")
 
 
 def main():
@@ -824,6 +914,19 @@ def main():
     dc.add_argument("file"); dc.add_argument("--pass", dest="password"); dc.set_defaults(fn=cmd_decrypt)
     rs = sub.add_parser("restore", help="还原库")
     rs.add_argument("file"); rs.add_argument("--yes", action="store_true"); rs.set_defaults(fn=cmd_restore)
+    au = sub.add_parser("audit", help="审计日志（鉴权失败/配置修改/导出备份/扩展报错/配对）")
+    au.add_argument("-n", "--limit", type=int, default=40, help="看最近 N 条；0 = 只看汇总")
+    au.add_argument("--action", help="只看某类动作（auth_fail/config_change/export/erase/backup/ext_error/pair_*）")
+    au.add_argument("--day", help="只看某天（YYYY-MM-DD）")
+    au.add_argument("--days", type=int, default=7, help="汇总窗口（默认近 7 天）")
+    au.add_argument("--stats", action="store_true", help="先给按动作的汇总")
+    au.set_defaults(fn=cmd_audit)
+    pa = sub.add_parser("pair", help="生成一次性配对码（MCU 中继/新设备换 token 用）")
+    pa.add_argument("--device", default="", help="绑定设备名（留空 = 任意设备可用）")
+    pa.add_argument("--ttl", type=int, default=15, help="有效期分钟（默认 15）")
+    pa.add_argument("--list", action="store_true", help="看最近的配对码（不生成）")
+    pa.add_argument("-n", "--limit", type=int, default=20)
+    pa.set_defaults(fn=cmd_pair)
 
     a = p.parse_args()
     if not getattr(a, "fn", None):

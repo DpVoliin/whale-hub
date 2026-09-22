@@ -121,6 +121,41 @@ UDP 的好处：不用建连、不用等响应，**发完就睡**，最省电。
 
 > 口径：`temp` / `hum` 这类**瞬时值**取"最近一次"；当天累计分钟数那种**累计值**取最新、**不要 SUM**。
 
+## 一次性配对（推荐姿势，v0.1.13 起）
+
+**不要在设备/中继里长期写明文 token**。改成"拿一个短码换一次 token"：
+
+```bash
+# 1) 在可信侧（服务器）生成一个码：15 分钟有效、**只能用一次**
+hubctl pair --device stm32_room
+#      4J6K-6SVP
+
+# 2) 中继拿它换 token（换到后写进 WHALE_TOKEN_FILE，之后重启复用，不用再配）
+export WHALE_HUB=https://YOUR_SERVER_IP:11443
+export WHALE_CA=/path/to/hub.crt          # 中枢自签证书
+python3 mcu_relay.py --pair 4J6K-6SVP --device stm32_room
+```
+
+设备侧也可以直接问（回的是**一行纯文本**，单片机不用解析 JSON）：
+
+```
+GET https://<中枢>:11443/api/pair?c=4J6K-6SVP&d=stm32_room
+→ 200  <token>            # 第一行就是 token
+→ 400  err:used           # 码已经被用过（一次性）
+→ 400  err:expired        # 超过 15 分钟
+→ 400  err:device_mismatch  # 码生成时绑定了别的设备名
+```
+
+## 证书固定（v0.1.13 起是**真**固定）
+
+中继到中枢那一段**强制 HTTPS**，并且：
+
+- **只信任 `WHALE_CA` 指定的那一张证书**（自建 SSLContext，**不再叠加系统根 CA** ——
+  旧写法用 `create_default_context` 会把公共 CA 也加进信任链，那不算固定）。
+- 可选 `WHALE_PIN=<证书 sha256>`：握手后逐字节比对服务器证书，不符即拒绝（防"CA 被换掉"）。
+  取指纹：`openssl x509 -in hub.crt -noout -fingerprint -sha256`（去掉冒号、小写）。
+- 没给 CA 又没显式 `WHALE_INSECURE=1` → **拒绝启动**（不给"默默降级成不校验"的机会）。
+
 ## 安全建议（重要）
 
 1. **别把中继的 8088/8089 暴露到公网** —— 它是明文口，只该在内网/VPN 里

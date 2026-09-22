@@ -56,6 +56,7 @@ curl -s -H "X-Token: $TOKEN" http://127.0.0.1:11440/llm-preview | head -40
 进模型的东西**一定**过一道关卡：通知原文 → 只留数值、App 名 → 只留分类、
 日程标题 → 只留类型、分钟级时间 → 只留小时、位置 → 只有城市级天气。
 **数据是你的，随时能拿走、能抹掉**：`GET /export`（机器可读 JSON，`?redact=1` 顺手脱敏）
+· 每一次导出/删除/备份/改配置/鉴权失败都留一条 **审计**（`hubctl audit`，只记动作不记内容）
 · `POST /erase`（物理删除 + VACUUM，删前自动备份）· 删掉 `hub.db` 就是彻底删除 ——
 这套系统没有云端副本，也不需要"注销账号"。详见 [`docs/SCHEMA.md`](docs/SCHEMA.md)。
 
@@ -76,7 +77,8 @@ curl -s -H "X-Token: $TOKEN" http://127.0.0.1:11440/llm-preview | head -40
 | 目录/文件 | 是什么 |
 |---|---|
 | `hub/hub.py` | 中枢：单文件 Python（零第三方依赖），HTTP + SQLite + 规则引擎 + 脱敏 + 定点提醒 |
-| `hub/hubctl.py` | 命令行工具：读数据 / 只读 SQL / 导出（可脱敏）/ 合并导入 / 备份还原 |
+| `hub/hubctl.py` | 命令行工具：读数据 / 只读 SQL / 导出（可脱敏）/ 合并导入 / 备份还原 / **审计 `audit`** / **配对码 `pair`** |
+| `GET /`（管理台） | **Web 管理台**：标准库 HTML，零前端依赖。看数据源健康度/决策/审计，改开关与人设，生成配对码。与 API **同一套 token** |
 | `hub/hub_install.sh` | 部署脚本：只放文件 + 写 cron，靠**文件指纹变化热重启**（永不需 kill 进程）|
 | `collector/` | Android 采集器（Kotlin）：屏幕用量、日程、健康通知、媒体会话、电量/闹钟；频率自适应 |
 | `speaker/whale_speaker.py` | 会拿主意的嘴：判断"说 / 不说 / 只聊一句"，定点提醒照发 |

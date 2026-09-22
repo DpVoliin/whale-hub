@@ -40,6 +40,7 @@ def load_ext():
                 EXT["loaded"].append("source:" + f)
             except Exception as e:
                 EXT["errors"].append("%s: %s" % (f, str(e)[:160]))
+                audit("ext_error", target="sources/" + f, result="error", note=str(e)[:120])
     hp = os.path.join(EXT_DIR, "hooks.py")
     if os.path.isfile(hp):
         try:
@@ -51,6 +52,7 @@ def load_ext():
             EXT["loaded"].append("hooks")
         except Exception as e:
             EXT["errors"].append("hooks.py: %s" % str(e)[:160])
+            audit("ext_error", target="hooks.py", result="error", note=str(e)[:120])
     if EXT["loaded"] or EXT["errors"]:
         print("[ext] 已加载 %s%s" % (EXT["loaded"] or "无",
                                      ("（错误 %d 条，见 /ext）" % len(EXT["errors"])) if EXT["errors"] else ""),

@@ -32,6 +32,14 @@ android {
     }
 
     // 与岛课表同一个调试签名：以后升级能直接覆盖安装，不用卸载
+    // ★ 但这个文件**不入库**（见 .gitignore）→ CI / 外部贡献者机器上没有它。
+    //   以前无条件引用它，AGP 在校验签名时会直接失败（本仓库 CI 12/12 全挂的原因之一）。
+    //   所以：有文件才启用；没有就退回 AGP 自带的 debug 签名（CI 照样能出包）。
+    val stableDebugKs = file("../keystore/debug.keystore")
+    val hasStableDebug = stableDebugKs.exists()
+    if (!hasStableDebug) {
+        logger.lifecycle("[signing] 没有 collector/keystore/debug.keystore → 用 AGP 默认 debug 签名")
+    }
     signingConfigs {
         if (hasReleaseKey) {
             create("release") {
@@ -42,16 +50,20 @@ android {
             }
         }
         // 自用调试签名（与岛课表同一个）：升级能覆盖安装，不用卸载
-        create("stableDebug") {
-            storeFile = file("../keystore/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        if (hasStableDebug) {
+            create("stableDebug") {
+                storeFile = stableDebugKs
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("stableDebug")
+            if (hasStableDebug) {
+                signingConfig = signingConfigs.getByName("stableDebug")
+            }
         }
         release {
             // 采集器逻辑不复杂，先不开混淆：用户/审计者能直接反编译核对"到底采了什么"

@@ -121,7 +121,6 @@ def bedtime_brief():
     """睡前小总结：**简单**为主 —— 今天屏幕多久、上了几节课、明早第一节几点。"""
     d = daily_digest()
     bed_min, n = est_bedtime()
-    p = CFG["persona"]
     lines = ["（认真）今天到这儿，鲸鲸给你收个尾："]
     bits = []
     if d["screen_minutes"] is not None:
@@ -143,7 +142,6 @@ def bedtime_brief():
 def human_close(kind="brief_evening"):
     """收尾的一句人话：把关键数字揉进自然语序，而不是"· 数据小结：A · B"。"""
     d = daily_digest()
-    p = CFG["persona"]
     bits = []
     if kind == "brief_morning":
         nxt = course_next_today()     # ⚠️ 今天没有课就什么也不说（别报明天的）
@@ -295,7 +293,6 @@ def analyze(day=None):
 
 def persona_line(level):
     """按人设给提醒配一句开场（先用模板，接入 LLM 后换成模型生成）。"""
-    p = CFG["persona"]
     return {
         "urgent": "（有点急）主人，先说要紧的 ——",
         "warn": "（认真）主人，鲸鲸提醒你一下 ——",
@@ -305,7 +302,6 @@ def persona_line(level):
 
 def compose_brief(kind="brief_morning"):
     """生成一条当日简报并入库（发队列）。"""
-    p = CFG["persona"]
     # 只挑最重要的 3 条（urgent → warn → info），多了像报告，不像人说话
     order = {"urgent": 0, "warn": 1, "info": 2}
     raw_items = sorted(analyze(), key=lambda i: order.get(i["level"], 3))

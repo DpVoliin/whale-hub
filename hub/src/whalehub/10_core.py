@@ -147,6 +147,11 @@ def make_backup(tag=None):
                 os.remove(os.path.join(backups_dir(), old))
             except Exception:
                 pass
+        try:
+            audit("backup", target=os.path.basename(out),
+                  note="%.1f MB" % (os.path.getsize(out) / 1048576.0))
+        except Exception:
+            pass
         return out
     except Exception as e:
         print(f"[backup] 失败：{str(e)[:80]}", flush=True)
@@ -424,6 +429,30 @@ def init_db():
             last_seen TEXT,
             note TEXT DEFAULT ''
         );
+
+        -- ★ 审计日志：只记「动作 + 对象 + 结果」，**不记数据内容**
+        --   （鉴权失败 / 配置修改 / 导出与备份 / 扩展加载报错 / 配对 / token 轮换）
+        CREATE TABLE IF NOT EXISTS audit(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            day TEXT NOT NULL,
+            action TEXT NOT NULL,               -- auth_fail / config_change / export / erase / backup / ext_error / pair / login ...
+            target TEXT DEFAULT '',             -- 对象（接口路径 / 配置项 / 文件名）—— 不含数据内容
+            actor TEXT DEFAULT '',              -- 来源标识（IP 或终端名）
+            result TEXT DEFAULT 'ok',           -- ok / denied / error
+            note TEXT DEFAULT ''                -- 一句短说明（不得写入原文/数值）
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_day ON audit(day, id);
+
+        -- ★ 一次性配对码：MCU 中继/新设备拿码换 token，用过即废（防长期明文口令）
+        CREATE TABLE IF NOT EXISTS pair_codes(
+            code TEXT PRIMARY KEY,
+            device TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            used_by TEXT DEFAULT ''
+        );
         """)
 
 
@@ -488,4 +517,133 @@ def band_stats(min_n=4):
                          "p_accept": round((1 + tot["ok"]) / (2 + tot["ok"] + tot["bad"]), 3)}
     except Exception as e:
         out["error"] = "%s: %s" % (type(e).__name__, str(e)[:60])
+    return out
+
+
+# ----------------------------------------------------------------- 审计日志
+# 设计红线：**只记动作与对象，不记数据内容** —— 它要能安全地留在库里、
+# 也能直接给人看（`hubctl audit`），所以绝不允许写入通知原文/数值/坐标。
+AUDIT_MAX = 200           # `hubctl audit` 默认看最近 N 条
+
+
+def audit(action, target="", actor="", result="ok", note=""):
+    """写一条审计。**任何情况下都不许影响主流程**（失败只打印）。"""
+    try:
+        with db() as c:
+            c.execute("INSERT INTO audit(ts, day, action, target, actor, result, note) "
+                      "VALUES (?,?,?,?,?,?,?)",
+                      (now_iso(), today_str(), str(action)[:32], str(target)[:120],
+                       str(actor)[:64], str(result)[:16], str(note)[:120]))
+    except Exception as e:
+        print("[audit] 写入失败：%s" % str(e)[:70], flush=True)
+
+
+def audit_recent(limit=AUDIT_MAX, action=None, day=None):
+    """读审计（给 hubctl / 管理页用）。"""
+    where, args = ["1=1"], []
+    if action:
+        where.append("action=?")
+        args.append(action)
+    if day:
+        where.append("day=?")
+        args.append(day)
+    with db() as c:
+        rows = c.execute("SELECT * FROM audit WHERE %s ORDER BY id DESC LIMIT ?"
+                         % " AND ".join(where), (*args, int(limit))).fetchall()
+    return [dict(r) for r in rows]
+
+
+def audit_stats(days=7):
+    """按动作汇总最近 N 天（管理页一眼看趋势）。"""
+    out = {"by_action": {}, "auth_fail": 0, "config_change": 0, "total": 0}
+    try:
+        since = (datetime.now(TZ) - timedelta(days=days)).strftime("%Y-%m-%d")
+        with db() as c:
+            for r in c.execute("SELECT action, COUNT(*) n FROM audit WHERE day>=? "
+                               "GROUP BY action ORDER BY n DESC", (since,)).fetchall():
+                out["by_action"][r["action"]] = r["n"]
+                out["total"] += r["n"]
+            for k in ("auth_fail", "config_change"):
+                out[k] = out["by_action"].get(k, 0)
+    except Exception as e:
+        out["error"] = "%s: %s" % (type(e).__name__, str(e)[:60])
+    return out
+
+
+# ----------------------------------------------------------------- 一次性配对码
+# 场景：单片机/新设备不方便长期存一把明文口令 → 先在可信侧生成一个短码，
+#       设备用它换一次 token，**码用过即废**（默认 15 分钟过期）。
+PAIR_TTL_MIN = 15
+_PAIR_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"      # 去掉 0/O/1/I/L 这些会读错的
+
+
+def pair_new(device="", ttl_min=PAIR_TTL_MIN):
+    """生成一个一次性配对码（明文口令本身不出现在码里）。"""
+    code = "-".join("".join(secrets.choice(_PAIR_ALPHABET) for _ in range(4)) for _ in range(2))
+    now = datetime.now(TZ)
+    exp = now + timedelta(minutes=max(1, int(ttl_min)))
+    with db() as c:
+        # 顺手清掉过期未用的（不留垃圾）
+        try:
+            c.execute("DELETE FROM pair_codes WHERE used_at IS NULL AND expires_at < ?", (now.isoformat(),))
+        except Exception:
+            pass
+        c.execute("INSERT INTO pair_codes(code, device, created_at, expires_at) VALUES (?,?,?,?)",
+                  (code, str(device or "")[:40], now.isoformat(), exp.isoformat()))
+    audit("pair_new", target=str(device or "(任意设备)")[:60],
+          note="码 %s**… 有效至 %s" % (code[:4], exp.strftime("%H:%M")))
+    return {"code": code, "device": device, "expires_at": exp.isoformat(),
+            "ttl_minutes": int(ttl_min)}
+
+
+def pair_claim(code, device, actor=""):
+    """用配对码换 token。**一次性**：第二次用同一个码会被拒（used_at 已写）。
+
+    返回 (ok, 结果 dict)。ok=False 时 dict 里是 err 前缀，方便单片机直接读。
+    """
+    code = str(code or "").strip().upper()
+    device = str(device or "").strip()
+    if not code or not device:
+        return False, {"err": "params"}
+    now = datetime.now(TZ)
+    try:
+        with db() as c:
+            row = c.execute("SELECT * FROM pair_codes WHERE code=?", (code,)).fetchone()
+            if not row:
+                audit("pair_claim", target=device[:60], actor=actor, result="denied", note="码不存在")
+                return False, {"err": "badcode"}
+            if row["used_at"]:
+                audit("pair_claim", target=device[:60], actor=actor, result="denied", note="码已被用过")
+                return False, {"err": "used"}
+            try:
+                if datetime.fromisoformat(row["expires_at"]) < now:
+                    audit("pair_claim", target=device[:60], actor=actor, result="denied", note="码已过期")
+                    return False, {"err": "expired"}
+            except Exception:
+                pass
+            if row["device"] and row["device"] != device:
+                audit("pair_claim", target=device[:60], actor=actor, result="denied",
+                      note="码已绑定 %s" % row["device"][:40])
+                return False, {"err": "device_mismatch"}
+            c.execute("UPDATE pair_codes SET used_at=?, used_by=? WHERE code=? AND used_at IS NULL",
+                      (now.isoformat(), device[:60], code))
+            if c.total_changes == 0:        # 并发下被别人抢先用了 → 一样算已用
+                return False, {"err": "used"}
+    except Exception as e:
+        return False, {"err": "db:" + type(e).__name__}
+    tok = ensure_mcu_token()
+    audit("pair_claim", target=device[:60], actor=actor, note="换到独立 MCU token（码已作废）")
+    return True, {"ok": True, "device": device, "token": tok,
+                  "note": "此码已作废；token 请存到设备侧，别再存码"}
+
+
+def pair_list(limit=20):
+    with db() as c:
+        rows = c.execute("SELECT code, device, created_at, expires_at, used_at, used_by "
+                         "FROM pair_codes ORDER BY created_at DESC LIMIT ?", (int(limit),)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["code"] = str(d["code"])[:4] + "**"          # 列表里不打印完整码（它本身是凭据）
+        out.append(d)
     return out

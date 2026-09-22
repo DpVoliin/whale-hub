@@ -10,9 +10,16 @@
 
 用法：
     export WHALE_HUB=https://YOUR_SERVER_IP:11443
-    export WHALE_TOKEN=你在 hub.json 里的 token
-    python3 mcu_relay.py                 # HTTP :8088 + UDP :8089
-    python3 mcu_relay.py --http 0 --udp 8089   # 只开 UDP
+    export WHALE_CA=/path/to/hub.crt          # 中枢自签证书（**现在是必填**，见下）
+    python3 mcu_relay.py --pair XXXX-XXXX     # ★ 一次性配对：换了 token 写文件，之后不用再配
+    python3 mcu_relay.py                      # 正常跑（HTTP :8088 + UDP :8089）
+    python3 mcu_relay.py --http 0 --udp 8089  # 只开 UDP
+
+安全（v2 起）：
+  · **强制 HTTPS + 证书固定**：只信任 WHALE_CA 这一张证书，**不叠加系统根 CA**
+    （旧写法用 create_default_context 会顺手加载系统信任链 → 公共 CA 理论上能伪造，那不算固定）。
+  · 可选 `WHALE_PIN=<sha256 指纹>`：握手后逐字节比对服务器证书，防"CA 被换掉"。
+  · **一次性配对码**：不长期存明文口令；用码换一次 token 后，码立即作废。
 
 设备怎么发（任选其一）：
     HTTP/1.0 GET：  GET /mcu?d=stm32_room&m=temp,hum&v=25.3,61&u=C
@@ -21,29 +28,51 @@
 """
 
 import argparse
+import hashlib
+import http.client
 import json
 import os
+import pathlib
 import socket
 import ssl
 import threading
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
 
 HUB = os.getenv("WHALE_HUB", "https://YOUR_SERVER_IP:11443").rstrip("/")
-TOKEN = os.getenv("WHALE_TOKEN", "")
-CA = os.getenv("WHALE_CA", "")          # 自签证书时给证书路径；留空则不校验证书（内网自用）
+TOKEN_FILE = os.getenv("WHALE_TOKEN_FILE", "/tmp/mcu_relay_token")
+DEVICE = os.getenv("WHALE_DEVICE", "mcu")
 MAX_PER_MIN = 600                       # 中继自身的软限流，防设备死循环刷爆中枢
-# ① 默认**必须**校验证书：不给 CA 直接拒绝启动。
-#    以前是"没给就降级成不校验"，等于默认网关在裸奔 —— 被 ping 过，改了。
+QUEUE = pathlib.Path(os.getenv("WHALE_QUEUE", "/tmp/mcu_relay_queue.jsonl"))   # ⑤ 失败落盘，稍后重发
+
+CA = os.getenv("WHALE_CA", "")          # 中枢自签证书路径（必填，除非中枢本身是 http）
+PIN = (os.getenv("WHALE_PIN", "") or "").strip().lower().replace(":", "")
 INSECURE = os.getenv("WHALE_INSECURE", "") == "1"
+
+
+def _token_from_file():
+    try:
+        return pathlib.Path(TOKEN_FILE).read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+TOKEN = os.getenv("WHALE_TOKEN", "") or _token_from_file()
+
+# ① 默认**必须**校验证书：不给 CA 直接拒绝启动。
 if HUB.startswith("http://"):
     # 中枢本身就在内网走明文（不常见，但允许）：那就不涉及证书
     print("[relay] 注意：中枢是 http://（明文），仅限完全可信的内网", flush=True)
     _ctx = None
 elif CA and os.path.exists(CA):
-    _ctx = ssl.create_default_context(cafile=CA)
+    # ★ 真·证书固定：自建 context + 只加载这一张证书，**不叠加系统根 CA**
+    _ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    _ctx.check_hostname = False            # 自签证书的 CN 常是 IP/自造，不做主机名校验
+    _ctx.verify_mode = ssl.CERT_REQUIRED
+    _ctx.load_verify_locations(cafile=CA)
+    _ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    print("[relay] 证书固定：只信任 %s%s" % (CA, "（指纹再校验 %s…）" % PIN[:12] if PIN else ""), flush=True)
 elif INSECURE:
     print("[relay] ⚠ 已按 WHALE_INSECURE=1 关闭证书校验（仅调试用，别这么上生产）", flush=True)
     _ctx = ssl._create_unverified_context()
@@ -54,7 +83,6 @@ else:
         "        （确实要跳过校验：WHALE_INSECURE=1，仅限调试）")
 
 _hits = []
-QUEUE = pathlib.Path(os.getenv("WHALE_QUEUE", "/tmp/mcu_relay_queue.jsonl"))   # ⑤ 失败落盘，稍后重发
 
 
 def limited():
@@ -74,12 +102,63 @@ def _enqueue(payload: dict):
         print(f"[relay] 落盘失败：{e}", flush=True)
 
 
-def _post(url: str, timeout: int = 12):
-    req = urllib.request.Request(url)
-    req.add_header("X-Token", TOKEN)
-    req.add_header("User-Agent", "mcu-relay/1.0")
-    with urllib.request.urlopen(req, timeout=timeout, context=_ctx) as r:
+def _get(url: str, timeout: int = 12, with_token: bool = True):
+    """最小 HTTPS 客户端：为什么不用 urlopen —— 因为**要在握手后比对证书指纹**。
+
+    urlopen 把连接藏起来了，拿不到对端证书；http.client 可以先 connect() 再取 socket。
+    返回 (status, body)。
+    """
+    u = urllib.parse.urlparse(url)
+    path = u.path + (("?" + u.query) if u.query else "")
+    headers = {"User-Agent": "mcu-relay/2.0"}
+    if with_token and TOKEN:
+        headers["X-Token"] = TOKEN
+    if u.scheme == "https":
+        conn = http.client.HTTPSConnection(u.hostname, u.port or 443, timeout=timeout, context=_ctx)
+    else:
+        conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=timeout)
+    try:
+        conn.connect()
+        if PIN and u.scheme == "https" and conn.sock is not None:
+            der = conn.sock.getpeercert(binary_form=True) or b""
+            got = hashlib.sha256(der).hexdigest()
+            if got != PIN:
+                raise ssl.SSLError("证书指纹不符（疑似中间人）—— 拿到 %s…，期望 %s…" % (got[:16], PIN[:16]))
+        conn.request("GET", path, headers=headers)
+        r = conn.getresponse()
         return r.status, r.read(200).decode("utf-8", "replace").strip()
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def claim_pair(code: str, device: str) -> str:
+    """★ 用一次性配对码换 token：换到就写进 TOKEN_FILE，之后重启复用（码本身作废）。
+
+    为什么需要它：设备/中继长期存一把明文口令是隐患，而人不可能每次手抄 32 位 token。
+    """
+    global TOKEN
+    url = ("%s/api/pair?c=%s&d=%s" % (HUB, urllib.parse.quote(code.strip()),
+                                      urllib.parse.quote(device or DEVICE)))
+    try:
+        st, body = _get(url, timeout=10, with_token=False)
+    except Exception as e:
+        print("[relay] 配对请求失败：%s: %s" % (type(e).__name__, str(e)[:80]), flush=True)
+        return ""
+    body = (body or "").strip()
+    if st == 200 and body and not body.startswith("err"):
+        try:
+            pathlib.Path(TOKEN_FILE).write_text(body, encoding="utf-8")
+            os.chmod(TOKEN_FILE, 0o600)
+        except Exception as e:
+            print("[relay] token 写盘失败（本次仍可用）：%s" % str(e)[:70], flush=True)
+        TOKEN = body
+        print("[relay] ✓ 配对成功：token 已写入 %s（配对码已作废）" % TOKEN_FILE, flush=True)
+        return body
+    print("[relay] ✗ 配对失败：%s（码只能用一次，且 15 分钟过期）" % (body[:80] or "无响应"), flush=True)
+    return ""
 
 
 def retry_worker():
@@ -99,7 +178,7 @@ def retry_worker():
                 except Exception:
                     continue
                 try:
-                    st, body = _post(item["url"])
+                    st, body = _get(item["url"])
                     if st == 200:
                         print(f"[relay] 补发成功 {item.get('dev')} {item.get('m')}", flush=True)
                         continue
@@ -132,16 +211,12 @@ def forward(device: str, pairs: list, seq: int = 0) -> str:
         url += f"&s={seq}"
         url += "&c=" + str(sum(f"{device}{metrics}{values}".encode()) % 256)
     try:
-        st, body = _post(url)
+        st, body = _get(url)
         ok = st == 200 and "ok" in body
         print(f"[relay] {device} → {metrics}={values}  {'✓' if ok else '✗'} {body[:60]}", flush=True)
-        return "ok" if ok else f"err:{body[:40]}"
-    except urllib.error.HTTPError as e:
-        msg = e.read(120).decode("utf-8", "replace")
-        print(f"[relay] {device} 被拒 HTTP {e.code}: {msg}", flush=True)
-        if e.code in (500, 502, 503, 504):
+        if not ok and st in (500, 502, 503, 504):
             _enqueue({"url": url, "dev": device, "m": metrics})      # 服务端问题 → 稍后补
-        return f"err:http{e.code}"
+        return "ok" if ok else f"err:{body[:40]}"
     except Exception as e:
         print(f"[relay] {device} 转发失败 {type(e).__name__}: {str(e)[:80]}（已落盘，稍后补发）", flush=True)
         _enqueue({"url": url, "dev": device, "m": metrics})
@@ -164,20 +239,21 @@ def parse_udp(text: str):
        'dev,metric,value'            （单指标，最短写法）
        'dev,metric:value,metric2:value2'
        'dev,temp=25.3,hum=61'        （容忍 = 号写法）
+       返回 (dev, pairs, meta)
     """
     text = text.strip().strip("\x00")
     if not text:
-        return "", []
+        return "", [], {}
     parts = [p.strip() for p in text.split(",") if p.strip()]
     if len(parts) < 2:
-        return "", []
+        return "", [], {}
     dev, rest = parts[0], parts[1:]
     no_sep = [x for x in rest if ":" not in x and "=" not in x]
     if len(rest) == 1 and len(no_sep) == 1:
-        return dev, [("value", rest[0], "")]
+        return dev, [("value", rest[0], "")], {}
     if len(rest) == 2 and len(no_sep) == 2:
         # 最常见的短写法："dev,metric,value"
-        return dev, [(rest[0], rest[1], "")]
+        return dev, [(rest[0], rest[1], "")], {}
     pairs, meta = [], {}
     for item in rest:
         for sep in (":", "="):
@@ -219,12 +295,12 @@ def http_server(port: int):
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(min(n, 4096)).decode("utf-8", "replace")
-            q = urllib.parse.parse_qs(raw.strip())
-            if not q:
-                dev, pairs, meta = parse_udp(raw)    # 也容忍纯文本行
+            parsed = urllib.parse.parse_qs(raw.strip())
+            if parsed:
+                dev, pairs = parse_http(parsed)
+                meta = {}
             else:
-                dev, pairs, meta = parse_http(q), {}
-                dev, pairs = dev
+                dev, pairs, meta = parse_udp(raw)    # 也容忍纯文本行
             seq = int((meta or {}).get("seq", 0) or 0)
             self._reply(forward(dev, pairs, seq))
 
@@ -266,13 +342,19 @@ def udp_server(port: int):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="MCU 中继：内网明文 ↔ 云上中枢 HTTPS")
+    ap = argparse.ArgumentParser(description="MCU 中继：内网明文 ↔ 云上中枢 HTTPS（证书固定 + 一次性配对）")
     ap.add_argument("--http", type=int, default=8088)
     ap.add_argument("--udp", type=int, default=8089)
+    ap.add_argument("--device", default=DEVICE, help="本中继代表的设备名（配对时用）")
+    ap.add_argument("--pair", default="", help="用一次性配对码换取 token（换到后写入 WHALE_TOKEN_FILE）")
     a = ap.parse_args()
-    if not TOKEN:
-        print("[relay] 警告：没设 WHALE_TOKEN，中枢会拒收（err:token）", flush=True)
     print(f"[relay] 中枢 {HUB}", flush=True)
+    if a.pair:
+        claim_pair(a.pair, a.device)
+        return
+    if not TOKEN:
+        print("[relay] 警告：没有 token（既没设 WHALE_TOKEN，也没有配对文件）→ 中枢会拒收 err:token。\n"
+              "        先配对：python3 mcu_relay.py --pair XXXX-XXXX", flush=True)
     if a.http:
         threading.Thread(target=http_server, args=(a.http,), daemon=True).start()
     if a.udp:

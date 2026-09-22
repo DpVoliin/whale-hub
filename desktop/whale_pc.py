@@ -38,7 +38,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 APP = "鲸鲸 · 电脑采集器"
 VERSION = "0.1.0"
@@ -206,8 +206,9 @@ class QueueCrypto(object):
         if IS_WIN:
             return b"DPAPI1" + self._dpapi(raw)
         try:
-            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
             import hashlib
+
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
             key = hashlib.sha256(self._local_keys() + b"|whalepc").digest()
             nonce = os.urandom(12)
             return b"AESGCM" + nonce + AESGCM(key).encrypt(nonce, raw, b"whalepc")
@@ -219,8 +220,9 @@ class QueueCrypto(object):
         if blob.startswith(b"DPAPI1"):
             return self._dpapi(blob[6:], unprotect=True)
         if blob.startswith(b"AESGCM"):
-            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
             import hashlib
+
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
             key = hashlib.sha256(self._local_keys() + b"|whalepc").digest()
             return AESGCM(key).decrypt(blob[6:18], blob[18:], b"whalepc")
         return blob[6:] if blob.startswith(b"RAWAIN") else blob

@@ -2,6 +2,51 @@
 
 版本号只递增**第三位**（本项目是自用系统，不做对外兼容承诺）。
 
+## v0.1.13 — 审计日志 / 一次性配对码 / Web 管理台 + CI 修复
+
+### 新增
+- **审计日志 `audit` 表**（P2）：记录**鉴权失败 / 配置修改 / 导出与备份 / 扩展加载报错 / 配对 / token 轮换**。
+  设计红线：**只记「动作 + 对象 + 结果」，不记数据内容** —— 所以它可以直接给人看、可以外发。
+  三处可读：`hubctl audit [--stats]` · `GET /audit` · 管理台里的表格。
+- **一次性配对码**（P1）：`hubctl pair --device stm32_room` 生成短码（15 分钟、**用过即废**）；
+  设备/中继拿它换一次 token（`GET /api/pair?c=码&d=设备名`，回一行纯文本，单片机直接读）。
+  不再需要把长期明文口令写在设备里。
+- **Web 管理台**（P2）：标准库拼 HTML，**不引任何前端框架**（守住零依赖）。数据源健康度 /
+  决策日志 / 审计 / 开关（关心、隐私、规则） / 改人设 / 生成配对码 / 扩展状态。
+  鉴权与 API **完全同一套 token**：登录页把 token 换成 HttpOnly + SameSite=Strict 的会话 cookie，
+  轮换 token 即废掉所有旧会话；API 侧仍然只认 `X-Token` 头。删除/导出这类破坏性动作**刻意只在 CLI**。
+
+### 修复（都是真 bug，其中两个让"已宣布完成"的功能在静默失效）
+- **`/bands` 只挂在 POST**：说话层无 body 时走 GET → 永远 404 → 分桶 Thompson **一直退回全局后验**。
+  改成 GET（读类接口本就该 GET），POST 保留兼容。
+- **说话层 `TZ` 未定义**：断点投递（v0.1.10 上线的四项文献算法之一）在异常里静默失效，从未生效。
+- **中枢缺 `import pathlib`**：`state.json`（调度状态落盘）读写抛 NameError → 重启防重复/防漏发一直没生效。
+- **`whale_web` 用 `lstrip("www.")`**：按字符集剥，"www.weibo.com" 会被剥成 "eibo.com"（域名比对错）。改正则。
+- **`mcu_relay.py` 缺 `import pathlib`**：文件一导入就 NameError —— 中继**从来跑不起来**。
+- 顺手清掉 ruff 抓出的 9 处未用变量/导入、`zip(strict=)`。
+
+### 变更（安全）
+- **MCU 中继强制 HTTPS + 真正的证书固定**：不再用 `create_default_context`（它会**叠加系统根 CA**，
+  等于公共 CA 也能伪造）—— 改成只信任 `WHALE_CA` 这一张证书；另支持 `WHALE_PIN=<sha256 指纹>`
+  逐字节比对（实测指纹不符会被明确拒绝并报"疑似中间人"）。
+
+### 修复（CI —— 此前 36 次运行**全部失败**，与 dependabot 无关）
+- **`ci` 的 ruff 从未通过**：配置里的 `UP` 那组规则要求重写全库刻意的 %-格式化（194 处）等，
+  实测 1012 处违规；且把片段源码当独立模块 lint，光假阳性 F821 就 645 处。
+  → 规则收窄到 `E,F,W,I,B`（理由写在 `pyproject.toml` 注释里），**改为 lint 合并产物 `hub/hub.py`**
+  （片段本就是半成品）。现在 ruff 本地全绿，并因此抓出上面两个真 bug。
+- **`android` 从未构建成功**：runner 自带 Gradle **9.7.1**，而 AGP 8.9.2 只支持 Gradle 8.x，且仓库里
+  没有 wrapper → 用系统 gradle 必挂。→ 显式钉 `gradle-version: 8.13`（顺带让产物可复现），加 `--stacktrace`。
+- **`android` 引用了不存在的签名文件**：`keystore/debug.keystore` 不入库，AGP 校验签名时直接失败
+  → 改成"文件存在才启用自用签名，否则退回 AGP 默认 debug 签名"。
+- **`scorecard` 引用了已删除的标签** `github/codeql-action/upload-sarif@v3`（上游只剩 v4.x）→ 升 v4；
+  Scorecard 本体是 Docker 容器（镜像从 ghcr.io 拉，实测 pull 失败）→ 标为**不阻断**并写明理由（它只是体检报告）。
+- 工作流里的 action 统一升到当前主版本（`checkout@v7` / `setup-python@v7` / `setup-java@v6` /
+  `cache@v6` / `upload-artifact@v7` / `gradle/actions@v6`）：Node 20 已进入强制迁移期。
+
+### 变更（杂项）
+- `VERSION` 从 `0.1.0`（早已过时）对齐到 `0.1.13`；`pyproject.toml` 的 `version` 同步（原来停在 0.1.6）。
+
 ## v0.1.12 — P2 传播与合规材料 + 采集器健康开关
 
 ### 新增（文档）

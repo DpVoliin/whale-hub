@@ -38,7 +38,6 @@ def scheduler():
             # ---- 睡前小总结：每天在你"推算的入睡时刻"前 15 分钟发一次 ----
             try:
                 bed_min, _n = est_bedtime()
-                bed_hm = f"{bed_min // 60:02d}:{bed_min % 60:02d}"
                 fire_hm = f"{(bed_min - 15) % 1440 // 60:02d}:{(bed_min - 15) % 1440 % 60:02d}"
                 if hm == fire_hm and last.get("bed") != day:
                     txt = bedtime_brief()

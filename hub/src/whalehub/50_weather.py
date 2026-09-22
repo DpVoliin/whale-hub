@@ -32,8 +32,8 @@ def _json_in(text):
 
 def wx_search_city(name):
     """把城市名换成中国天气网代码（任意城市；多地用户就靠这个）。"""
-    import urllib.request as _rq
     import urllib.parse as _up
+    import urllib.request as _rq
     req = _rq.Request("http://toy1.weather.com.cn/search?cityname=" + _up.quote(name) + "&_=1")
     req.add_header("User-Agent", WX_UA)
     req.add_header("Referer", "http://www.weather.com.cn/")
@@ -130,7 +130,7 @@ def weather_cities():
 
 def fetch_weather(days=2):
     """抓天气（Open-Meteo，免 key）。城市级坐标写在 privacy.weather_lat/lon，不涉及定位。"""
-    import urllib.request as _urlreq          # 显式导入：别依赖别处的作用域别名
+    import urllib.request as _urlreq  # 显式导入：别依赖别处的作用域别名
 
     # ① 先试官方源（中国气象局数据）：一次拿到实况 + 多天 + 预警 + 生活指数
     saved = 0

@@ -16,6 +16,7 @@ import re
 import time
 import urllib.request
 
+
 def _scripts_dir() -> pathlib.Path:
     """说话层要读的角色卡/配置在哪。
 

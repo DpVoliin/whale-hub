@@ -154,7 +154,7 @@ def main():
     db = home / "hub.db"
     size = db.stat().st_size if db.exists() else 0
     print(f"  ✓ 写入 {n} 行 · {a.days} 天 · 场景 {a.scenario} · 库 {size / 1024:.0f} KB")
-    print(f"  下一步可以拿它测：")
+    print("  下一步可以拿它测：")
     print(f"     WHALE_HOME={home} python3 hub/hubctl.py status")
     print(f"     WHALE_HOME={home} python3 hub/hubctl.py today")
     return 0

@@ -1,4 +1,9 @@
 # OpenSSF Scorecard：供应链安全的机器体检（结果会显示在仓库安全页）
+#
+# ⚠️ 这个工作流**不阻断**（job 级 continue-on-error）：
+#   Scorecard 的 action 是在 Docker 容器里跑的，镜像要从 ghcr.io 拉 —— 实测在 runner 上
+#   "Docker pull failed"，属于**外部依赖抖动**，不是本仓库代码的问题。
+#   它只是"体检报告"，不该让整仓的 PR 列表全变红。
 name: scorecard
 
 on:
@@ -13,22 +18,24 @@ permissions: read-all
 jobs:
   analysis:
     runs-on: ubuntu-latest
+    continue-on-error: true          # ★ 见文件头说明：报告类，不阻断
     permissions:
       security-events: write     # 上传 SARIF
       id-token: write            # 发布结果（Scorecard 需要）
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Run analysis
-        uses: ossf/scorecard-action@v2.4.0
+        uses: ossf/scorecard-action@v2.4.4
         with:
           results_file: results.sarif
           results_format: sarif
           publish_results: true
       - name: Upload to code scanning
-        uses: github/codeql-action/upload-sarif@v3
+        # ★ 原来写的是 @v3 —— 上游已经删掉 v3 标签，只剩 v4.x，引用解析不了（必然失败）
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results.sarif

@@ -15,6 +15,8 @@
 | `episodes_fts*` | 情节的全文索引（trigram，中文可搜） | 随 episodes 重建 | ❌ 派生数据 |
 | `decisions` | **决策日志**：每次"说/不说"的间隔、理由、料分、场景桶 | 手动删 | ❌（给人回放用） |
 | `feedback` | 挂件上的 ✓/✗ 反馈（Thompson 后验用） | 手动删 | ❌（只影响阈值，不进上下文） |
+| `audit` | **审计日志**：`action/target/actor/result/note` —— 鉴权失败、配置修改、导出/删除/备份、扩展报错、配对、token 轮换 | 手动删（`hubctl audit --day`） | ❌ **且设计上物理不存数据内容**（只记动作与对象，所以能安全外发） |
+| `pair_codes` | **一次性配对码**：`code/device/expires_at/used_at/used_by`。码用过即废，15 分钟过期；过期的自动清 | 自动清理 + 手动删 | ❌ |
 | `timetable` | 课表原文（岛课表导出的 JSON） | 手动删 | ⚠️ **只取节次与类型**，课程名/教师/教室都剥掉 |
 | `terminals` / devices | 设备名与最后上报时间 | 永久 | ❌ |
 

@@ -14,7 +14,13 @@
     python3 tests/test_privacy_regression.py --file dump.json   # 用已存的 /llm-preview 快照跑
 退出码：0 = 全过；1 = 有泄漏（**放进 CI，别让人肉记得**）。
 """
-import argparse, json, os, re, ssl, sys, urllib.request
+import argparse
+import json
+import os
+import re
+import ssl
+import sys
+import urllib.request
 
 HUB = os.environ.get("WHALE_HUB", "https://YOUR_SERVER:11443")
 TOKEN = os.environ.get("WHALE_TOKEN", "")

@@ -143,6 +143,7 @@ results.append(("open_chat 已从代码里删掉", not hasattr(m.Widget, "open_c
 
 # ③b4 音效 wav 必须是能解码的真文件
 import wave as _wave
+
 for _n, _lab in (("sfx_pop.wav", "啵"),):   # 鸭子叫已按用户要求删掉，不再验它
     _p = os.path.join(ROOT, "assets", _n)
     try:
