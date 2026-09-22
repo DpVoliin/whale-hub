@@ -62,7 +62,7 @@
 
 ```
 hub/
-├── src/whalecare/          ← **真相**：按职责切成 13 个片段
+├── src/whalecare/          ← **真相**：按职责切成若干片段（文件名数字前缀 = 合并顺序）
 │     00_header   10_core      20_timetable  30_rules    40_privacy
 │     50_weather  60_analysis  70_care       80_persona  90_ext
 │     95_scheduler 97_http     99_main

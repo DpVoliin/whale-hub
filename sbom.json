@@ -1,10 +1,10 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:3a9db4a4-34f3-4b23-9c35-bc07922e684c",
+  "serialNumber": "urn:uuid:b89746f2-b667-4bb3-8a5f-0c1127f39755",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-09-22T04:34:47Z",
+    "timestamp": "2026-09-22T07:39:37Z",
     "tools": [
       {
         "vendor": "whalecare",
@@ -14,14 +14,14 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.17",
+      "bom-ref": "pkg:generic/whalecare@0.1.19",
       "name": "whalecare",
-      "version": "0.1.17",
+      "version": "0.1.19",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "6e870021fb55f25f38456675286101608fbbad90235ae820e69236365edf4953"
+          "content": "715685bbdb6cbeb2c1b1ff05d4612636f9e4ed28393d0c46d960249bf129aa97"
         }
       ],
       "properties": [
@@ -31,7 +31,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "de90489c6947cc0fe5202f6840c1814df32098af"
+          "value": "affaaa6b8c0f377676ce86401454e25af853600f"
         }
       ]
     }
@@ -39,14 +39,14 @@
   "components": [
     {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.17",
+      "bom-ref": "pkg:generic/whalecare@0.1.19",
       "name": "whalecare",
-      "version": "0.1.17",
+      "version": "0.1.19",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "6e870021fb55f25f38456675286101608fbbad90235ae820e69236365edf4953"
+          "content": "715685bbdb6cbeb2c1b1ff05d4612636f9e4ed28393d0c46d960249bf129aa97"
         }
       ],
       "properties": [
@@ -56,7 +56,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "de90489c6947cc0fe5202f6840c1814df32098af"
+          "value": "affaaa6b8c0f377676ce86401454e25af853600f"
         }
       ]
     },
