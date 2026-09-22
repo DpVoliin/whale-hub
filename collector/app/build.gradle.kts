@@ -21,12 +21,12 @@ plugins {
 
 android {
     namespace = "dev.dpvoliin.whalecollector"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "dev.dpvoliin.whalecollector"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 700
         versionName = "0.7.0"
     }
@@ -66,9 +66,10 @@ android {
             }
         }
         release {
-            // 采集器逻辑不复杂，先不开混淆：用户/审计者能直接反编译核对"到底采了什么"
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // 采集器逻辑不复杂，**刻意不混淆**：用户/审计者能直接反编译核对"到底采了什么"。
+            // 这里不再显式写 isMinifyEnabled/isShrinkResources —— 它们的默认值本来就是 false，
+            // 而 AGP 9 的 Kotlin DSL 对这两个属性的命名动过，写死了反而会因名字变化而构建失败。
+            // 真要开混淆，就在 AGP 9 的文档确认写法后再加回来。
             if (hasReleaseKey) {
                 signingConfig = signingConfigs.getByName("release")
             }
@@ -79,7 +80,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
+}
+
+// ★ Kotlin 2.4 起 `kotlinOptions` 已被移除 → 用 compilerOptions（这是官方迁移方向）
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
 }
 
 dependencies {

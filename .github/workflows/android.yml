@@ -20,13 +20,14 @@ jobs:
           java-version: "17"
 
       # ★ 为什么必须显式钉 Gradle 版本：
-      #   ubuntu runner 自带的是 Gradle 9.x，而 AGP 8.9.2 只支持 Gradle 8.x →
-      #   用系统 gradle 会直接构建失败（本工作流此前 12/12 全挂，就是这个原因）。
-      #   钉住版本同时也让产物可复现（不同时间的 runner 不再影响构建）。
-      - name: 钉 Gradle 8.13（AGP 8.9.2 支持的版本）
+      #   ubuntu runner 自带的是 Gradle 9.x，而当年 AGP 8.9.2 只支持 Gradle 8.x →
+      #   用系统 gradle 会直接构建失败（本工作流曾 12/12 全挂，就是这个原因）。
+      #   现在已升到 AGP 9.4.1，对应的就是 Gradle 9.x：**两边必须一起动**，
+      #   单改一边就是"AGP 9 要 Gradle 9 / 或 AGP 8 不认 Gradle 9"的必红组合。
+      - name: 钉 Gradle 9.7.1（AGP 9.4.1 对应的版本）
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "8.13"
+          gradle-version: "9.7.1"
 
       - name: 缓存 Gradle
         uses: actions/cache@v6
