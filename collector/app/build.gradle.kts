@@ -24,12 +24,12 @@ plugins {
 
 android {
     namespace = "dev.dpvoliin.whalecollector"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "dev.dpvoliin.whalecollector"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 701
         versionName = "0.7.1"
     }

@@ -80,10 +80,10 @@ python3 collector/tools/check_apk.py <你的.apk> --host <你的IP>:11443
 | JDK | **17.0.20**（OpenJDK） | AGP 9.x 要求 JDK 17+ |
 | Gradle | **8.11.1** | 仓库不带 wrapper 时用系统 gradle |
 | Android Gradle Plugin | **9.4.1** | AGP 9 **内置 Kotlin**，不再 apply `kotlin.android` |
-| compileSdk / targetSdk | **36** | ⚠️ 别写 37：`platforms;android-37` 不存在，写了会 `Failed to find target android-37` |
+| compileSdk / targetSdk | **37** | ★ **不能降到 36**：`androidx.core:core-ktx 1.19.0` 的 AAR 元数据硬要求 compile >= 37，降到 36 会让 `:app:checkDebugAarMetadata` 直接失败（2026-09-22 真踩过，CI 一路红）|
 | minSdk | **26** | Android 8.0 |
 | Build-Tools | **36.0.0**（35.0.0 也在） | |
-| SDK 平台 | **platforms;android-36** | 必须已安装，否则同上报错 |
+| SDK 平台 | **platforms;android-37** | CI runner 自带；**本机装不上**（这台机器能访问的 SDK 源不提供 `platforms;android-37`，`--channel=1` 也试过）→ **本机不再出包，APK 交给 CI**（见下）|
 | 产物 | `:app:assembleDebug` → 3.59 MB · `:app:assembleRelease` → 未签名 2.74 MB | CI 的 android 任务同样跑这两个 |
 
 **首次构建需要联网**：依赖（androidx / kotlin-stdlib 等）要从 Maven 拉一次；
@@ -102,3 +102,16 @@ gradle :app:assembleDebug          # 产物 app/build/outputs/apk/debug/app-debu
 在有网环境执行一次 `gradle --write-verification-metadata sha256 help` 与
 `gradle dependencies --write-locks`，把生成的 `gradle/verification-metadata.xml`
 与 `*.lockfile` 一起提交，即可从"记录了版本"升级到"依赖字节级可复现"。
+
+## 本机为什么不再出 APK（2026-09-22 起）
+
+采集器的 `androidx.core:core-ktx 1.19.0` 硬要求 `compileSdk >= 37`，而本机可访问的
+Android SDK 源**不提供 `platforms;android-37`**（默认通道与 `--channel=1` 预览通道都试过）。
+所以：
+
+- **`gradle :app:assembleDebug` 在本机不再可用**（会停在 `checkDebugAarMetadata` / 找不到 target）
+- **出包走 CI**：`.github/workflows/android.yml` 的 runner 自带所需 SDK，PR 会把 APK 作为产物上传
+- 真机验收请在 CI 的产物页下载，或在你自己的机器上装好 `platforms;android-37` 后本地构建
+
+> 这一条是"本地工具链看不到 ≠ 不存在"的具体代价 —— 我 2026-09-22 就是因为本机列不出 37
+> 才误把 compileSdk 降到 36，导致 CI 一路红。真相是：**依赖硬要求 37，平台存在但本机装不到。**

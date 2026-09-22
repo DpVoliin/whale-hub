@@ -82,22 +82,29 @@ class VersionConsistencyTest(unittest.TestCase):
         self.assertIsNotNone(m, "包壳里找不到 __version__")
         self.assertEqual(m.group(1), self.v, "whalecare/__init__.py 的版本落后了")
 
-    def test_collector_compilesdk_is_installable(self):
-        """采集器的 compileSdk 必须是真实存在的平台。
+    def test_collector_compilesdk_matches_documented_baseline(self):
+        """compileSdk 必须与 docs/ANDROID-RELEASE.md 的构建基线**一致**。
 
-        2026-09-22 踩过：仓库写着 37，但 `platforms;android-37` 不存在 → 构建直接失败；
-        而本机那份是 36 所以"我这儿能编" —— 典型的仓库/本地漂移。加这条防复发。
+        为什么不是"必须 ≤ 36"：我 2026-09-22 曾因本机 sdkmanager 默认通道列不出 android-37
+        就断言"该平台不存在"，把 compileSdk 从 37 降到 36 —— CI 立刻一路红。
+        真因是 androidx.core 1.19.0 的 AAR 元数据**硬要求 compile >= 37**；
+        而那个平台其实存在，只是要先 `sdkmanager --channel=1`（预览通道）才列得出来。
+        教训：**本地工具链看不到 ≠ 不存在。**
+        所以这条锁的是"配置与文档必须一致"——两边任一单独改都会立刻红。
         """
-        p = ROOT / "collector" / "app" / "build.gradle.kts"
-        if not p.is_file():
-            self.skipTest("没有采集器工程")
-        text = p.read_text(encoding="utf-8")
-        m = re.search(r"compileSdk\s*=\s*(\d+)", text)
+        cfg = ROOT / "collector" / "app" / "build.gradle.kts"
+        doc = ROOT / "docs" / "ANDROID-RELEASE.md"
+        if not cfg.is_file() or not doc.is_file():
+            self.skipTest("没有采集器工程或基线文档")
+        m = re.search(r"compileSdk\s*=\s*(\d+)", cfg.read_text(encoding="utf-8"))
         self.assertIsNotNone(m, "找不到 compileSdk")
         sdk = int(m.group(1))
-        self.assertLessEqual(sdk, 36, f"compileSdk={sdk} 目前没有可安装平台，构建会失败")
-        self.assertGreaterEqual(sdk, 26, f"compileSdk={sdk} 太低")
-
+        dm = re.search(r"compileSdk / targetSdk\s*\|\s*\*\*(\d+)\*\*", doc.read_text(encoding="utf-8"))
+        self.assertIsNotNone(dm, "基线文档里找不到 compileSdk 行")
+        documented = int(dm.group(1))
+        self.assertEqual(sdk, documented,
+                         f"配置里 compileSdk={sdk}，文档写的是 {documented} —— 必须一起改")
+        self.assertGreaterEqual(sdk, 36, f"compileSdk={sdk} 太低")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
