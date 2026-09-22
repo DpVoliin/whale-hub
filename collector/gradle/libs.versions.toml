@@ -1,8 +1,8 @@
 # ★ 工具链要**一起升**，别拆成单个 PR：androidx.core-ktx 1.19.0 硬要求 AGP >= 9.1，
 #   而 AGP 9 又要求 Gradle 9 —— 单独合任何一个都会让构建失败（dependabot 拆三条 PR 踩过）。
+# ★ 也没有 kotlin 版本了：AGP 9 **内置 Kotlin**，不再 apply kotlin.android 插件（喜欢再自行指定）。
 [versions]
 agp = "9.4.1"
-kotlin = "2.4.20"
 core = "1.19.0"
 appcompat = "1.7.0"
 
@@ -12,4 +12,3 @@ androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
