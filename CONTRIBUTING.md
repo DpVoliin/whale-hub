@@ -77,6 +77,11 @@ git add hub/src/whalecare/60_analysis.py hub/hub.py
 
 ---
 
+## 不知道从哪开始？
+
+看 [`docs/COMMUNITY.md`](docs/COMMUNITY.md) —— 那里有版本策略（什么时候算 1.0）和一批
+带**证据 + 验收标准**的小任务，每条都能直接认领。
+
 ## 开发环境
 
 ```bash
