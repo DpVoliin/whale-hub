@@ -18,17 +18,18 @@
 """
 import json
 import os
+import pathlib
 import re
 import secrets
-import sys
-import ssl
 import sqlite3
+import ssl
 import statistics
+import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 
 def _resolve_home() -> str:
@@ -67,7 +68,7 @@ except OSError:
     pass
 CFG_PATH = os.path.join(BASE, "hub.json")
 DB_PATH = os.path.join(BASE, "hub.db")
-VERSION = "0.1.0"
+VERSION = "0.1.18"
 TZ = timezone(timedelta(hours=8))          # 北京时间（用户在国内，固定 +8，避免服务器 UTC 漂移）
 
 DEFAULT_CFG = {
@@ -118,6 +119,8 @@ DEFAULT_CFG = {
         "wecom_secret": "",
         "wecom_agentid": "",
         "wecom_touser": "@all",
+        # 通用出口：任何接受 POST {"text": "..."} 的地址（自建转发服务 / Slack-Discord 中转）
+        "generic_webhook": "",
     },
     "privacy": {
         # 哪些分类**值得拿出来说**（其余如 学习/办公/工具/其他 一律不提）
@@ -315,6 +318,11 @@ def make_backup(tag=None):
                 os.remove(os.path.join(backups_dir(), old))
             except Exception:
                 pass
+        try:
+            audit("backup", target=os.path.basename(out),
+                  note="%.1f MB" % (os.path.getsize(out) / 1048576.0))
+        except Exception:
+            pass
         return out
     except Exception as e:
         print(f"[backup] 失败：{str(e)[:80]}", flush=True)
@@ -439,7 +447,7 @@ def episode_search(q, limit=8):
         return []
 
 
-def decision_log(kind, gap_sec=None, reason="", material=None, said=None, band=None):
+def decision_log(kind, gap_sec=None, reason="", material=None, said=None, band=None, ctx=None):
     """★ 结构化决策日志：把"为什么这么决定"落成**可回放的字段**，而不是只写一行中文理由。
 
     为什么必须有（外部评审点出来的真问题）：只记文本理由 = 一个月后完全回放不了，
@@ -447,14 +455,18 @@ def decision_log(kind, gap_sec=None, reason="", material=None, said=None, band=N
     """
     try:
         with db() as c:
-            c.execute("INSERT INTO decisions(ts, day, kind, gap_sec, reason, material, said, band) "
-                      "VALUES (?,?,?,?,?,?,?,?)",
+            try:      # ctx = 做决定时的输入（band/material/said/silent/hour），回放靠它
+                _ctx = json.dumps(ctx, ensure_ascii=False)[:400] if isinstance(ctx, (dict, list)) else str(ctx or "")[:400]
+            except Exception:
+                _ctx = ""
+            c.execute("INSERT INTO decisions(ts, day, kind, gap_sec, reason, material, said, band, ctx) "
+                      "VALUES (?,?,?,?,?,?,?,?,?)",
                       (now_iso(), today_str(), str(kind)[:24],
                        int(gap_sec) if gap_sec is not None else None,
                        str(reason or "")[:200],
                        int(material) if material is not None else None,
                        int(said) if said is not None else None,
-                       str(band or "")[:24]))
+                       str(band or "")[:24], _ctx))
     except Exception as e:
         print(f"[decision] 写入失败：{str(e)[:60]}", flush=True)
 
@@ -509,9 +521,41 @@ def db():
     return conn
 
 
-def init_db():
-    with db() as c:
-        c.executescript("""
+# ---------------------------------------------------------------- schema 迁移框架
+# 为什么要有它：以前改表结构 = 手写 ALTER + try/except 兜住，ctx 那次就是这么写进
+# executescript 的 —— 结果第二次启动报 duplicate column name，**init_db 整个中断**
+# （它之后的建表语句全部没执行，terminals 没建成 → /today 直接断连）。
+# 现在：版本号存 `PRAGMA user_version`，迁移是**有序函数列表**，一步一提交、可单独测、
+# 失败也不会让中枢起不来（报出来 + `hubctl schema` 能看出落在哪一版）。
+# 硬要求：**每个迁移都必须幂等**（IF NOT EXISTS / 先查再加列）—— 老库 user_version=0
+# 但表已存在，会被当成"从头跑一遍"，不幂等就会炸。
+SCHEMA_VERSION = 4
+_MIGRATIONS = []
+
+
+def migration(fn):
+    """注册一个迁移（注册顺序 = 版本顺序）。"""
+    _MIGRATIONS.append(fn)
+    return fn
+
+
+def _add_column(conn, table, col, ddl):
+    """幂等加列：已经有就跳过（ALTER 加已有列会报 duplicate column name）。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(%s)" % table)}
+    if col in cols:
+        return False
+    conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, col, ddl))
+    return True
+
+
+def _has_table(conn, name):
+    return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
+
+
+@migration
+def _mig_001_base(conn):
+    """v1：基础表（v0.1.x 的那套建表语句，全部 IF NOT EXISTS → 幂等）。"""
+    conn.executescript("""
         -- 迁移：删掉历史遗留的 UNIQUE 索引（它会吃数据）
         DROP INDEX IF EXISTS idx_metrics_dedup;
         CREATE TABLE IF NOT EXISTS metrics(
@@ -574,7 +618,10 @@ def init_db():
         CREATE TABLE IF NOT EXISTS decisions(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ts TEXT, day TEXT, kind TEXT, gap_sec INTEGER,
-            reason TEXT, material INTEGER, said INTEGER, band TEXT);
+            reason TEXT, material INTEGER, said INTEGER, band TEXT,
+            -- ★ ctx：做决定时的**输入**（band/material/said/silent/hour 的 JSON）。
+            --   有输入才能真回放（换参数重算"当时会怎么决定"）；只有结论就只能猜。
+            ctx TEXT DEFAULT '');
         CREATE TABLE IF NOT EXISTS seen_events(
             event_id TEXT PRIMARY KEY, ts TEXT);
         CREATE TABLE IF NOT EXISTS episodes(
@@ -592,7 +639,85 @@ def init_db():
             last_seen TEXT,
             note TEXT DEFAULT ''
         );
+
+        -- ★ 审计日志：只记「动作 + 对象 + 结果」，**不记数据内容**
+        --   （鉴权失败 / 配置修改 / 导出与备份 / 扩展加载报错 / 配对 / token 轮换）
+        CREATE TABLE IF NOT EXISTS audit(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            day TEXT NOT NULL,
+            action TEXT NOT NULL,               -- auth_fail / config_change / export / erase / backup / ext_error / pair / login ...
+            target TEXT DEFAULT '',             -- 对象（接口路径 / 配置项 / 文件名）—— 不含数据内容
+            actor TEXT DEFAULT '',              -- 来源标识（IP 或终端名）
+            result TEXT DEFAULT 'ok',           -- ok / denied / error
+            note TEXT DEFAULT ''                -- 一句短说明（不得写入原文/数值）
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_day ON audit(day, id);
+
+        -- ★ 一次性配对码：MCU 中继/新设备拿码换 token，用过即废（防长期明文口令）
+        CREATE TABLE IF NOT EXISTS pair_codes(
+            code TEXT PRIMARY KEY,
+            device TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            used_by TEXT DEFAULT ''
+        );
         """)
+@migration
+def _mig_002_decisions_ctx(conn):
+    """v2：decisions 加 ctx（做决定时的输入；回放要能重算，不能只存结论）。"""
+    return _add_column(conn, "decisions", "ctx", "TEXT DEFAULT ''")
+
+
+@migration
+def _mig_004_feedback_weight(conn):
+    """v4：feedback 加 `w`（证据强度）与 `src`（谁给的：manual / implicit）。
+
+    为什么要权重：主人亲手点的 ✓/✗ 是**强证据**（w=1.0）；
+    "她说完 30 分钟内主人有没有回话"推出来的隐式反馈是**弱证据**（w=0.4~0.6）。
+    喂给 Beta 后验时按分数计数：(1 + Σw_ok) / (2 + Σw_ok + Σw_bad)——
+    这样弱证据能推动后验、但不会压过主人亲手点的；日志里也看得出每条是谁给的。
+    """
+    _add_column(conn, "feedback", "w", "REAL DEFAULT 1.0")
+    _add_column(conn, "feedback", "src", "TEXT DEFAULT 'manual'")
+
+
+@migration
+def _mig_003_audit_and_pair(conn):
+    """v3：audit（只记动作不记内容的审计）与 pair_codes（一次性配对码）。"""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS audit(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL, day TEXT NOT NULL, action TEXT NOT NULL,
+            target TEXT DEFAULT '', actor TEXT DEFAULT '',
+            result TEXT DEFAULT 'ok', note TEXT DEFAULT '');
+        CREATE INDEX IF NOT EXISTS idx_audit_day ON audit(day, id);
+        CREATE TABLE IF NOT EXISTS pair_codes(
+            code TEXT PRIMARY KEY, device TEXT DEFAULT '',
+            created_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+            used_at TEXT, used_by TEXT DEFAULT '');
+    """)
+
+
+def init_db():
+    """建库 + 迁移。**幂等**：连跑多次都安全（test_migrate.py 就是这么验的）。"""
+    with db() as c:
+        cur = int(c.execute("PRAGMA user_version").fetchone()[0] or 0)
+        for ver, fn in enumerate(_MIGRATIONS, start=1):
+            if ver <= cur:
+                continue
+            try:
+                fn(c)
+            except Exception as e:
+                # 迁移失败也**不许**把中枢带崩（自用系统：先可用，再把问题喊出来）
+                print("[db] ✗ 迁移到 v%d 失败：%s: %s（库停在 v%d，hubctl schema 可查）"
+                      % (ver, type(e).__name__, str(e)[:80], ver - 1), flush=True)
+                return
+            c.execute("PRAGMA user_version = %d" % ver)
+            c.commit()
+        if int(c.execute("PRAGMA user_version").fetchone()[0] or 0) != cur:
+            print("[db] schema v%d → v%d" % (cur, SCHEMA_VERSION), flush=True)
 
 
 def now_iso():
@@ -638,7 +763,9 @@ def band_stats(min_n=4):
     out = {"global": {}, "bands": {}, "min_n": min_n}
     try:
         with db() as c:
-            rows = c.execute("SELECT band, verdict, COUNT(*) n FROM feedback GROUP BY band, verdict").fetchall()
+            # ★ 按**证据强度**加权计数（手动 w=1，隐式 0.4~0.6）——见 _mig_004
+            rows = c.execute("SELECT band, verdict, SUM(COALESCE(w, 1.0)) n "
+                             "FROM feedback GROUP BY band, verdict").fetchall()
         tot = {"ok": 0, "bad": 0}
         for r in rows:
             b = str(r["band"] or "(无桶)")
@@ -656,6 +783,135 @@ def band_stats(min_n=4):
                          "p_accept": round((1 + tot["ok"]) / (2 + tot["ok"] + tot["bad"]), 3)}
     except Exception as e:
         out["error"] = "%s: %s" % (type(e).__name__, str(e)[:60])
+    return out
+
+
+# ----------------------------------------------------------------- 审计日志
+# 设计红线：**只记动作与对象，不记数据内容** —— 它要能安全地留在库里、
+# 也能直接给人看（`hubctl audit`），所以绝不允许写入通知原文/数值/坐标。
+AUDIT_MAX = 200           # `hubctl audit` 默认看最近 N 条
+
+
+def audit(action, target="", actor="", result="ok", note=""):
+    """写一条审计。**任何情况下都不许影响主流程**（失败只打印）。"""
+    try:
+        with db() as c:
+            c.execute("INSERT INTO audit(ts, day, action, target, actor, result, note) "
+                      "VALUES (?,?,?,?,?,?,?)",
+                      (now_iso(), today_str(), str(action)[:32], str(target)[:120],
+                       str(actor)[:64], str(result)[:16], str(note)[:120]))
+    except Exception as e:
+        print("[audit] 写入失败：%s" % str(e)[:70], flush=True)
+
+
+def audit_recent(limit=AUDIT_MAX, action=None, day=None):
+    """读审计（给 hubctl / 管理页用）。"""
+    where, args = ["1=1"], []
+    if action:
+        where.append("action=?")
+        args.append(action)
+    if day:
+        where.append("day=?")
+        args.append(day)
+    with db() as c:
+        rows = c.execute("SELECT * FROM audit WHERE %s ORDER BY id DESC LIMIT ?"
+                         % " AND ".join(where), (*args, int(limit))).fetchall()
+    return [dict(r) for r in rows]
+
+
+def audit_stats(days=7):
+    """按动作汇总最近 N 天（管理页一眼看趋势）。"""
+    out = {"by_action": {}, "auth_fail": 0, "config_change": 0, "total": 0}
+    try:
+        since = (datetime.now(TZ) - timedelta(days=days)).strftime("%Y-%m-%d")
+        with db() as c:
+            for r in c.execute("SELECT action, COUNT(*) n FROM audit WHERE day>=? "
+                               "GROUP BY action ORDER BY n DESC", (since,)).fetchall():
+                out["by_action"][r["action"]] = r["n"]
+                out["total"] += r["n"]
+            for k in ("auth_fail", "config_change"):
+                out[k] = out["by_action"].get(k, 0)
+    except Exception as e:
+        out["error"] = "%s: %s" % (type(e).__name__, str(e)[:60])
+    return out
+
+
+# ----------------------------------------------------------------- 一次性配对码
+# 场景：单片机/新设备不方便长期存一把明文口令 → 先在可信侧生成一个短码，
+#       设备用它换一次 token，**码用过即废**（默认 15 分钟过期）。
+PAIR_TTL_MIN = 15
+_PAIR_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"      # 去掉 0/O/1/I/L 这些会读错的
+
+
+def pair_new(device="", ttl_min=PAIR_TTL_MIN):
+    """生成一个一次性配对码（明文口令本身不出现在码里）。"""
+    code = "-".join("".join(secrets.choice(_PAIR_ALPHABET) for _ in range(4)) for _ in range(2))
+    now = datetime.now(TZ)
+    exp = now + timedelta(minutes=max(1, int(ttl_min)))
+    with db() as c:
+        # 顺手清掉过期未用的（不留垃圾）
+        try:
+            c.execute("DELETE FROM pair_codes WHERE used_at IS NULL AND expires_at < ?", (now.isoformat(),))
+        except Exception:
+            pass
+        c.execute("INSERT INTO pair_codes(code, device, created_at, expires_at) VALUES (?,?,?,?)",
+                  (code, str(device or "")[:40], now.isoformat(), exp.isoformat()))
+    audit("pair_new", target=str(device or "(任意设备)")[:60],
+          note="码 %s**… 有效至 %s" % (code[:4], exp.strftime("%H:%M")))
+    return {"code": code, "device": device, "expires_at": exp.isoformat(),
+            "ttl_minutes": int(ttl_min)}
+
+
+def pair_claim(code, device, actor=""):
+    """用配对码换 token。**一次性**：第二次用同一个码会被拒（used_at 已写）。
+
+    返回 (ok, 结果 dict)。ok=False 时 dict 里是 err 前缀，方便单片机直接读。
+    """
+    code = str(code or "").strip().upper()
+    device = str(device or "").strip()
+    if not code or not device:
+        return False, {"err": "params"}
+    now = datetime.now(TZ)
+    try:
+        with db() as c:
+            row = c.execute("SELECT * FROM pair_codes WHERE code=?", (code,)).fetchone()
+            if not row:
+                audit("pair_claim", target=device[:60], actor=actor, result="denied", note="码不存在")
+                return False, {"err": "badcode"}
+            if row["used_at"]:
+                audit("pair_claim", target=device[:60], actor=actor, result="denied", note="码已被用过")
+                return False, {"err": "used"}
+            try:
+                if datetime.fromisoformat(row["expires_at"]) < now:
+                    audit("pair_claim", target=device[:60], actor=actor, result="denied", note="码已过期")
+                    return False, {"err": "expired"}
+            except Exception:
+                pass
+            if row["device"] and row["device"] != device:
+                audit("pair_claim", target=device[:60], actor=actor, result="denied",
+                      note="码已绑定 %s" % row["device"][:40])
+                return False, {"err": "device_mismatch"}
+            c.execute("UPDATE pair_codes SET used_at=?, used_by=? WHERE code=? AND used_at IS NULL",
+                      (now.isoformat(), device[:60], code))
+            if c.total_changes == 0:        # 并发下被别人抢先用了 → 一样算已用
+                return False, {"err": "used"}
+    except Exception as e:
+        return False, {"err": "db:" + type(e).__name__}
+    tok = ensure_mcu_token()
+    audit("pair_claim", target=device[:60], actor=actor, note="换到独立 MCU token（码已作废）")
+    return True, {"ok": True, "device": device, "token": tok,
+                  "note": "此码已作废；token 请存到设备侧，别再存码"}
+
+
+def pair_list(limit=20):
+    with db() as c:
+        rows = c.execute("SELECT code, device, created_at, expires_at, used_at, used_by "
+                         "FROM pair_codes ORDER BY created_at DESC LIMIT ?", (int(limit),)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["code"] = str(d["code"])[:4] + "**"          # 列表里不打印完整码（它本身是凭据）
+        out.append(d)
     return out
 # ----------------------------------------------------------------- 课表 / 日程
 def _timetable():
@@ -950,7 +1206,6 @@ def bedtime_brief():
     """睡前小总结：**简单**为主 —— 今天屏幕多久、上了几节课、明早第一节几点。"""
     d = daily_digest()
     bed_min, n = est_bedtime()
-    p = CFG["persona"]
     lines = ["（认真）今天到这儿，鲸鲸给你收个尾："]
     bits = []
     if d["screen_minutes"] is not None:
@@ -972,7 +1227,6 @@ def bedtime_brief():
 def human_close(kind="brief_evening"):
     """收尾的一句人话：把关键数字揉进自然语序，而不是"· 数据小结：A · B"。"""
     d = daily_digest()
-    p = CFG["persona"]
     bits = []
     if kind == "brief_morning":
         nxt = course_next_today()     # ⚠️ 今天没有课就什么也不说（别报明天的）
@@ -1124,7 +1378,6 @@ def analyze(day=None):
 
 def persona_line(level):
     """按人设给提醒配一句开场（先用模板，接入 LLM 后换成模型生成）。"""
-    p = CFG["persona"]
     return {
         "urgent": "（有点急）主人，先说要紧的 ——",
         "warn": "（认真）主人，鲸鲸提醒你一下 ——",
@@ -1134,7 +1387,6 @@ def persona_line(level):
 
 def compose_brief(kind="brief_morning"):
     """生成一条当日简报并入库（发队列）。"""
-    p = CFG["persona"]
     # 只挑最重要的 3 条（urgent → warn → info），多了像报告，不像人说话
     order = {"urgent": 0, "warn": 1, "info": 2}
     raw_items = sorted(analyze(), key=lambda i: order.get(i["level"], 3))
@@ -1167,6 +1419,27 @@ def compose_brief(kind="brief_morning"):
     return rid, text
 
 
+def band_now(when=None):
+    """场景桶 = 星期类 × 时段带。
+
+    ★ 必须与说话层 `whale_adapt.band_key()` **逐字一致**（工作日/周末 × 早上/白天/睡前/深夜）。
+      两边名字对不上，桶后验就永远取不到 → 分桶 Thompson 静默退化成全局后验。
+      以前的坑就在这：反馈（挂件点 ✓/✗）上报时不带桶，全部落进 `(无桶)`，
+      桶里永远没样本。现在中枢自己按上报时刻算，客户端一行都不用改。
+      一致性有跨模块测试盯着：tests/test_band_consistency.py。
+    """
+    dt = when or datetime.now(TZ)
+    wk = "周末" if dt.weekday() >= 5 else "工作日"
+    m = dt.hour * 60 + dt.minute
+    if 6 * 60 + 30 <= m < 10 * 60:
+        band = "早上"
+    elif m >= 21 * 60 + 30 or m < 30:
+        band = "睡前"
+    elif m < 6 * 60 + 30:
+        band = "深夜"
+    else:
+        band = "白天"
+    return "%s·%s" % (wk, band)
 # ----------------------------------------------------------------- 脱敏（给 AI 之前）
 _APP_CATS = [
     ("社交", ("微信", "wechat", "weixin", "tencent.mm", "qq", "微博", "weibo", "telegram", "whatsapp",
@@ -1204,13 +1477,30 @@ def is_game(app, pkg):
     return any(h.lower() in hay for h in GAME_HINTS)
 
 
+_CAT_APP_CACHE = {}
+
+
 def cat_app(name, pkg=""):
-    """具体应用名 → 分类标签（模型只看得到分类）。"""
+    """具体应用名 → 分类标签（模型只看得到分类）。
+
+    ★ 记忆化：它是**纯函数**（name+pkg 决定结果），但压测发现一次 `llm_context()`
+    要调它 **14 万次**（30 天 × 每 10 分钟一轮的 app.usage_minutes 行），每次还线性扫一遍
+    分类表 → 单次 llm_context 从 60ms 涨到 2 秒。实际不同 App 名只有几个，缓存住即可。
+    """
+    key = (name, pkg)
+    hit = _CAT_APP_CACHE.get(key)
+    if hit is not None:
+        return hit
     hay = f"{name} {pkg}".lower()
+    out = "其他"
     for label, keys in _APP_CATS:
         if any(k in hay for k in keys):
-            return label
-    return "其他"
+            out = label
+            break
+    if len(_CAT_APP_CACHE) > 512:      # 别让缓存无限长（App 名理论上可能很多）
+        _CAT_APP_CACHE.clear()
+    _CAT_APP_CACHE[key] = out
+    return out
 
 
 def cat_event(title):
@@ -1298,8 +1588,8 @@ def _json_in(text):
 
 def wx_search_city(name):
     """把城市名换成中国天气网代码（任意城市；多地用户就靠这个）。"""
-    import urllib.request as _rq
     import urllib.parse as _up
+    import urllib.request as _rq
     req = _rq.Request("http://toy1.weather.com.cn/search?cityname=" + _up.quote(name) + "&_=1")
     req.add_header("User-Agent", WX_UA)
     req.add_header("Referer", "http://www.weather.com.cn/")
@@ -1396,7 +1686,7 @@ def weather_cities():
 
 def fetch_weather(days=2):
     """抓天气（Open-Meteo，免 key）。城市级坐标写在 privacy.weather_lat/lon，不涉及定位。"""
-    import urllib.request as _urlreq          # 显式导入：别依赖别处的作用域别名
+    import urllib.request as _urlreq  # 显式导入：别依赖别处的作用域别名
 
     # ① 先试官方源（中国气象局数据）：一次拿到实况 + 多天 + 预警 + 生活指数
     saved = 0
@@ -1428,7 +1718,7 @@ def fetch_weather(days=2):
            f"&timezone=Asia%2FShanghai&forecast_days={days}")
     try:
         req = _urlreq.Request(url)
-        req.add_header("User-Agent", "Mozilla/5.0 (whale-hub)")
+        req.add_header("User-Agent", "Mozilla/5.0 (whalecare)")
         with _urlreq.urlopen(req, timeout=20) as r:
             d = json.loads(r.read().decode())
     except Exception as e:
@@ -1544,8 +1834,20 @@ def _day_series(c, metric, days=21, kind="peak", floor=0.0):
 def _cat_day_series(c, days=21):
     """{类别: {日期: 分钟}} —— 与 llm_context 同口径：每个 App 取当天最新，再按类别相加。"""
     d0 = (datetime.now(TZ) - timedelta(days=days)).strftime("%Y-%m-%d")
-    rows = c.execute("SELECT day, ts, value, meta FROM metrics WHERE day>=? AND metric='app.usage_minutes' "
-                     "ORDER BY ts ASC", (d0,)).fetchall()
+    # ★ 先在库里把「每个 App 当天最新」压出来，别再拉几万行回 Python 逐行 json.loads。
+    #   压测实测（40 万行）：原写法 21 天要拉 14 万行 + 14 万次 json.loads →
+    #   单次 llm_context 2 秒（而她每次开口前都要算一次）。
+    #   窗口函数需要 SQLite ≥3.25；没有就退回旧写法（功能不变，只是慢）。
+    try:
+        rows = c.execute(
+            "SELECT day, ts, value, meta FROM ("
+            "  SELECT day, ts, value, meta,"
+            "         ROW_NUMBER() OVER (PARTITION BY day, meta ORDER BY ts DESC) rn"
+            "  FROM metrics WHERE day>=? AND metric='app.usage_minutes'"
+            ") WHERE rn=1", (d0,)).fetchall()
+    except Exception:
+        rows = c.execute("SELECT day, ts, value, meta FROM metrics "
+                         "WHERE day>=? AND metric='app.usage_minutes' ORDER BY ts ASC", (d0,)).fetchall()
     latest = {}                                   # (day, pkg) -> (类别, 分钟)
     for r in rows:
         try:
@@ -1974,7 +2276,7 @@ def llm_context(day=None):
 
     with db() as c:
         # 睡眠（30 分钟粒度 + 小时级时间）
-        for metric, label in (("sleep.total_minutes", "睡眠"),):
+        for metric, _label in (("sleep.total_minutes", "睡眠"),):
             m = _latest_metric(c, metric)
             if m and m.get("value") is not None:
                 ctx["sleep"] = {"minutes_rounded": blur_minutes(m["value"]), "at": hour_only(m["ts"])}
@@ -2574,6 +2876,7 @@ def load_ext():
                 EXT["loaded"].append("source:" + f)
             except Exception as e:
                 EXT["errors"].append("%s: %s" % (f, str(e)[:160]))
+                audit("ext_error", target="sources/" + f, result="error", note=str(e)[:120])
     hp = os.path.join(EXT_DIR, "hooks.py")
     if os.path.isfile(hp):
         try:
@@ -2585,6 +2888,7 @@ def load_ext():
             EXT["loaded"].append("hooks")
         except Exception as e:
             EXT["errors"].append("hooks.py: %s" % str(e)[:160])
+            audit("ext_error", target="hooks.py", result="error", note=str(e)[:120])
     if EXT["loaded"] or EXT["errors"]:
         print("[ext] 已加载 %s%s" % (EXT["loaded"] or "无",
                                      ("（错误 %d 条，见 /ext）" % len(EXT["errors"])) if EXT["errors"] else ""),
@@ -2646,6 +2950,75 @@ def ext_loop():
         time.sleep(30)
 
 
+# ---------------------------------------------------------------- 出口（直发通道）
+# 为什么要有它：主出口是"说话层 → Hermes 网关 webhook → 微信"，那条链依赖网关活着。
+# 这里给中枢自己开**直发**通道，一台 4C4G 的机器 + 一个 webhook 就能把话说出去：
+#   · 企业微信群机器人（官方接口、无限流）—— 填 channels.wecom_webhook 即可，不需要 corpid/secret
+#   · 通用 webhook —— 任何接受 POST {"text": "..."} 的地址（自建小服务、Slack/Discord 中转等）
+# 刻意**不**自动发：自动发会和说话层重复推送。它是个"通道"，由调用方（人 / cron / 扩展）决定何时用。
+CHANNEL_KEYS = ("wecom_webhook", "generic_webhook", "wecom_corpid", "wecom_secret", "wecom_agentid", "wecom_touser")
+
+
+def channels_status(cfg=None):
+    """各出口配没配（给人看的；**不打印 webhook 地址本身**，它带密钥）。"""
+    ch = (cfg or CFG).get("channels") or {}
+    return {
+        "wecom_bot": "已配置" if ch.get("wecom_webhook") else "空",
+        "generic_webhook": "已配置" if ch.get("generic_webhook") else "空",
+        "wecom_app": "已配置" if all(ch.get(k) for k in ("wecom_corpid", "wecom_secret", "wecom_agentid"))
+                     else "空（需要 corpid + secret + agentid）",
+        "note": "主出口仍是说话层→网关；这里是中枢**直发**通道，不自动使用",
+    }
+
+
+def _post_json(url, payload, timeout=10):
+    import urllib.request
+    req = urllib.request.Request(url, data=json.dumps(payload, ensure_ascii=False).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.getcode(), r.read(200).decode("utf-8", "replace")
+
+
+def channel_send(text, cfg=None):
+    """把一条消息发到所有已配置的直发出口。返回 {出口: "ok"/错误}。
+
+    企业微信群机器人要求的 payload 是 {"msgtype":"text","text":{"content": ...}}；
+    通用出口只要求 {"text": ...}（够简单，自己搭个转发服务就能接）。
+    """
+    ch = (cfg or CFG).get("channels") or {}
+    text = str(text or "").strip()
+    out = {}
+    if not text:
+        return {"error": "内容为空"}
+    url = (ch.get("wecom_webhook") or "").strip()
+    if url:
+        try:
+            st, body = _post_json(url, {"msgtype": "text", "text": {"content": text[:1800]}})
+            out["wecom_bot"] = "ok" if st == 200 else "HTTP %s" % st
+            if st == 200 and '"errcode":0' not in body.replace(" ", ""):
+                out["wecom_bot"] = "被拒：%s" % body[:80]
+        except Exception as e:
+            out["wecom_bot"] = "%s: %s" % (type(e).__name__, str(e)[:60])
+    url2 = (ch.get("generic_webhook") or "").strip()
+    if url2:
+        try:
+            st, _ = _post_json(url2, {"text": text[:1800]})
+            out["generic"] = "ok" if st == 200 else "HTTP %s" % st
+        except Exception as e:
+            out["generic"] = "%s: %s" % (type(e).__name__, str(e)[:60])
+    if not out:
+        out["error"] = "没有配置任何直发出口（channels.wecom_webhook / generic_webhook）"
+    try:
+        audit("channel_send", target=",".join(sorted(out)), result="ok" if "ok" in str(list(out.values())) else "error",
+              note="直发一条（%d 字）" % len(text))
+    except Exception:
+        pass
+    return out
+
+
+def channel_test(cfg=None):
+    """发一条测试消息（配出口时用它验收，别等真有事才发现不通）。"""
+    return channel_send("（测试）whalecare 直发通道已连通 —— 收到即说明配置生效。", cfg)
 # ----------------------------------------------------------------- 调度线程
 def scheduler():
     """每 5 秒看一眼：到点生成简报 / 发现异常立刻说（不依赖外部 cron）。
@@ -2686,7 +3059,6 @@ def scheduler():
             # ---- 睡前小总结：每天在你"推算的入睡时刻"前 15 分钟发一次 ----
             try:
                 bed_min, _n = est_bedtime()
-                bed_hm = f"{bed_min // 60:02d}:{bed_min % 60:02d}"
                 fire_hm = f"{(bed_min - 15) % 1440 // 60:02d}:{(bed_min - 15) % 1440 % 60:02d}"
                 if hm == fire_hm and last.get("bed") != day:
                     txt = bedtime_brief()
@@ -2980,7 +3352,20 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- 工具
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
-        data = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode()
+        # ★ 三种 body 分开处理，别一律 json.dumps：
+        #   · bytes → 原样发
+        #   · str   → 调用方**已经备好原文**（HTML / 纯文本），直接 utf-8 发
+        #   · 其它（dict / list）→ 才是 JSON
+        #   踩过的坑：以前对 str 也 json.dumps，于是 HTML 变成
+        #   "\"<!doctype html>…\n<meta …>\"" —— 前导多一个引号、真换行变**字面量 \n**、
+        #   CSS 里的 "Segoe UI" 被转义成 \" → 页面"能打开但全是坏的"（/dash 从写出来就这样，
+        #   管理台也中招；只有在浏览器里真看一眼才发现）。
+        if isinstance(body, (bytes, bytearray, memoryview)):
+            data = bytes(body)
+        elif isinstance(body, str):
+            data = body.encode("utf-8")
+        else:
+            data = json.dumps(body, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
@@ -2988,12 +3373,34 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _client(self):
+        return self.client_address[0]
+
+    def _cookie_sess(self):
+        """管理页的会话 cookie（值 = HMAC(token)）。**只给浏览器用**；API 仍然只认 header。"""
+        raw = self.headers.get("Cookie") or ""
+        for part in raw.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "whale_admin":
+                return v.strip()
+        return ""
+
+    def _switch(self):
+        """当前请求的接口路径（审计用；不含 query，免得把参数写进日志）。"""
+        return (self.path or "").split("?")[0][:80]
+
     def _auth(self, q):
         # 只认 header 里的 X-Token：?token= 会进服务器日志、也会留在浏览器历史/代理记录里
         tok = self.headers.get("X-Token") or ""
         if not tok and (q.get("token") or [""])[0]:
             print(f"[warn] {self.client_address[0]} 试图用 query 里的 token（已拒绝）", flush=True)
-        if tok != CFG["token"]:
+            audit("auth_fail", target=self._switch(), actor=self._client(),
+                  result="denied", note="试图用 query 传 token")
+        ok = (tok == CFG["token"]) or (bool(self._cookie_sess()) and self._cookie_sess() == admin_session())
+        if not ok:
+            # ★ 审计：鉴权失败只记「谁 + 打哪个接口 + 结果」，不记他发了什么内容
+            audit("auth_fail", target=self._switch(), actor=self._client(),
+                  result="denied", note="token 不匹配" if tok else "没带 token")
             self._send(401, {"error": "token 不对"})   # ⚠️ 别把服务端路径写进报错（安全自测抓到：路径泄露）
             return False
         return True
@@ -3037,7 +3444,7 @@ class Handler(BaseHTTPRequestHandler):
             def _jsonable(v):
                 """SQLite 行里可能有 bytes（BLOB）→ 转成可 JSON 序列化的形式。"""
                 if isinstance(v, (bytes, bytearray, memoryview)):
-                    import base64 as _b64          # 局部导入：不依赖文件顶部的导入顺序
+                    import base64 as _b64  # 局部导入：不依赖文件顶部的导入顺序
                     return _b64.b64encode(bytes(v)).decode("ascii")
                 return v
 
@@ -3114,15 +3521,31 @@ class Handler(BaseHTTPRequestHandler):
         #   回一行纯文本 ok / err:xxx —— 单片机不用解析 JSON
         if self.path.startswith("/api/mcu"):
             return self._mcu(urlparse(self.path).query)
+        # 屏幕/音箱类设备的下发口（同样允许 query token：单片机上带自定义 header 很麻烦）
+        if self.path.startswith("/mcu/inbox"):
+            return self._mcu_inbox(parse_qs(urlparse(self.path).query))
+        if self.path.startswith("/mcu/ack"):
+            return self._mcu_ack(parse_qs(urlparse(self.path).query))
+        if self.path.startswith("/api/pair"):
+            return self._pair(urlparse(self.path).query)     # 设备友好：换回来是一行纯文本
 
         u = urlparse(self.path)
         path, q = u.path, parse_qs(u.query)
-        if path in ("/", "/index.html"):
-            return self._page()
+        # ★ 下面三条**在鉴权之前**：登录页本身不能要求已登录
+        if path == "/login":
+            return self._login(q)
+        if path == "/logout":
+            return self._logout()
+        if path in ("/", "/index.html", "/admin"):
+            return self._admin_page(q)
         if path == "/health":
             return self._send(200, self._health())
         if not self._auth(q):
             return
+        if path == "/audit":
+            lim = min(500, int((q.get("limit") or ["100"])[0] or 100))
+            return self._send(200, {"stats": audit_stats(),
+                                    "items": audit_recent(lim, (q.get("action") or [""])[0] or None)})
         if path == "/ext":
             return self._send(200, {
                 "dir": EXT_DIR,
@@ -3135,6 +3558,8 @@ class Handler(BaseHTTPRequestHandler):
                 "note": "外挂扩展：加一个文件就多一个数据源，中枢核心不需要改；扩展报错不影响主流程",
             })
         if path == "/export":
+            audit("export", target="redact=%s" % (1 if (q.get("redact") or ["0"])[0] == "1" else 0),
+                  actor=self._client(), note="全量导出（GDPR Art.20）")
             return self._export(q)
         if path == "/today":
             return self._today(q)
@@ -3142,7 +3567,7 @@ class Handler(BaseHTTPRequestHandler):
             lim = min(50, int((q.get("limit") or ["20"])[0] or 20))
             consume = (q.get("consume") or ["0"])[0] == "1"
             with db() as c:
-                rows = c.execute("SELECT id, ts, verdict, band, note FROM feedback "
+                rows = c.execute("SELECT id, ts, verdict, band, note, w, src FROM feedback "
                                  "WHERE consumed=0 ORDER BY id ASC LIMIT ?", (lim,)).fetchall()
                 if consume and rows:
                     c.execute("UPDATE feedback SET consumed=1 WHERE id IN (%s)"
@@ -3155,6 +3580,11 @@ class Handler(BaseHTTPRequestHandler):
             with db() as c:
                 rows = c.execute("SELECT * FROM decisions ORDER BY id DESC LIMIT ?", (lim,)).fetchall()
             return self._send(200, {"count": len(rows), "items": [dict(r) for r in rows]})
+        if path == "/bands":
+            # ★ 这里原来是**只挂在 do_POST** 的：说话层用 GET 调（它无 body 时就走 GET），
+            #   于是永远 404 → 分桶后验静默失效、一直退回全局后验（今天才查出来）。
+            #   读类接口就该 GET；POST 那份保留，向后兼容已有调用方。
+            return self._send(200, band_stats())
         if path == "/memory":
             qq = (q.get("q") or [""])[0]
             return self._send(200, {"q": qq, "items": episode_search(qq) if qq else episodes_recent()})
@@ -3186,6 +3616,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._pending(q)
         if path == "/devices":
             return self._send(200, self._devices())
+        if path == "/channels":
+            return self._send(200, channels_status())
         if path == "/remind":
             with db() as c:
                 rows = c.execute("SELECT * FROM scheduled WHERE fired_at IS NULL "
@@ -3225,6 +3657,11 @@ class Handler(BaseHTTPRequestHandler):
             _n = 0
         if _n > MAX_BODY:
             return self._send(413, {"error": f"请求太大，上限 {MAX_BODY // 1024}KB"})
+        # 登录/管理台要在鉴权之前（登录本身就是"还没登录"时做的）
+        if path == "/login":
+            return self._login_post()
+        if path == "/admin":
+            return self._admin_post(q)
         if not self._auth(q):
             return
         if path == "/bands":
@@ -3236,12 +3673,19 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 decision_log(str(b.get("kind") or "speak"), float(b.get("gap_sec") or 0),
                              str(b.get("reason") or "")[:200], int(b.get("material") or 0),
-                             int(b.get("said") or 0), str(b.get("band") or ""))
+                             int(b.get("said") or 0), str(b.get("band") or ""),
+                             b.get("ctx"))
                 return self._send(200, {"ok": True})
             except Exception as e:
                 return self._send(500, {"ok": False, "error": "%s: %s" % (type(e).__name__, str(e)[:80])})
         if path == "/erase":
-            return self._erase(self._body())
+            b = self._body()
+            b = b if isinstance(b, dict) else {}
+            _ok = (b.get("confirm") == "ERASE-ALL")
+            audit("erase", target=str(b.get("scope") or "all"), actor=self._client(),
+                  result="ok" if _ok else "denied",
+                  note="已执行物理删除" if _ok else "缺 confirm，已拒绝")
+            return self._erase(b)
         if path == "/ingest":
             return self._ingest(self._body())
         if path == "/timetable":
@@ -3261,17 +3705,29 @@ class Handler(BaseHTTPRequestHandler):
             v = str(b.get("verdict") or "").strip().lower()
             if v not in ("good", "bad"):
                 return self._send(400, {"ok": False, "error": "verdict 只能是 good / bad"})
+            # ★ 客户端的口子只传 verdict（挂件/App 都不知道"当前场景桶"是什么）；
+            #   桶由**中枢按上报时刻自己算** → 分桶 Thompson 才真能攒到样本。
+            band = str(b.get("band") or "").strip()[:24] or band_now()
+            # ★ 证据强度：手动点 = 1.0；隐式推断（回话/没回话）默认 0.5
+            try:
+                w = float(b.get("w", 1.0))
+            except (TypeError, ValueError):
+                w = 1.0
+            w = max(0.05, min(1.0, w))
+            src = str(b.get("src") or "manual").strip()[:16] or "manual"
             with db() as c:
-                c.execute("INSERT INTO feedback(ts, verdict, band, note) VALUES (?,?,?,?)",
-                          (now_iso(), v, str(b.get("band") or "")[:24], str(b.get("note") or "")[:200]))
-            print(f"[feedback] {v}", flush=True)
-            return self._send(200, {"ok": True, "verdict": v})
+                c.execute("INSERT INTO feedback(ts, verdict, band, note, w, src) VALUES (?,?,?,?,?,?)",
+                          (now_iso(), v, band, str(b.get("note") or "")[:200], w, src))
+            print(f"[feedback] {v} w={w} src={src} band={band}", flush=True)
+            return self._send(200, {"ok": True, "verdict": v, "band": band, "w": w, "src": src})
         if path == "/persona":
             body = self._body()
             if isinstance(body, dict) and body:
                 CFG["persona"].update(body)
                 with open(CFG_PATH, "w", encoding="utf-8") as f:
                     json.dump(CFG, f, ensure_ascii=False, indent=2)
+                audit("config_change", target="persona:" + ",".join(sorted(body)[:8]),
+                      actor=self._client(), note="改了人设字段 %d 个" % len(body))
                 return self._send(200, {"ok": True, "persona": CFG["persona"]})
             return self._send(400, {"error": "body 要是一个对象"})
         if path == "/brief":
@@ -3292,12 +3748,24 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/channels":
             body = self._body()
             ch = CFG.setdefault("channels", {})
-            for k in ("wecom_webhook", "wecom_corpid", "wecom_secret", "wecom_agentid", "wecom_touser"):
+            for k in CHANNEL_KEYS:
                 if k in body:
                     ch[k] = str(body[k]).strip()
             with open(CFG_PATH, "w", encoding="utf-8") as f:
                 json.dump(CFG, f, ensure_ascii=False, indent=2)
+            audit("config_change", target="channels:" + ",".join(sorted(body)[:8]),
+                  actor=self._client(), note="改了出口字段 %d 个" % len(body))
             return self._send(200, {"ok": True, "channels": {k: ("已设置" if v else "空") for k, v in ch.items()}})
+        if path == "/push":
+            # 直发一条到已配置出口（企业微信群机器人 / 通用 webhook），不经 Hermes 网关
+            b = self._body() or {}
+            text = str(b.get("text") or "").strip()
+            if not text:
+                return self._send(400, {"ok": False, "error": "要传 {text}"})
+            return self._send(200, {"ok": True, "result": channel_send(text),
+                                    "channels": channels_status()})
+        if path == "/push/test":
+            return self._send(200, {"ok": True, "result": channel_test(), "channels": channels_status()})
         if path == "/push/register":
             body = self._body()
             name, url = (body.get("name") or "").strip(), (body.get("url") or "").strip()
@@ -3336,16 +3804,23 @@ class Handler(BaseHTTPRequestHandler):
                 cur = c.execute("INSERT INTO scheduled(at_iso, text, daily, created_at) VALUES (?,?,?,?)",
                                 (t.isoformat(), text, daily, now_iso()))
                 rid = cur.lastrowid
+            audit("config_change", target="scheduled#%s" % rid, actor=self._client(),
+                  note="定点 %s%s" % (at, "（每天）" if daily else ""))
             return self._send(200, {"ok": True, "id": rid, "at": t.isoformat(),
                                     "daily": bool(daily), "text": text})
         if path == "/chat":
             return self._chat(self._body())
         return self._send(404, {"error": "没有这个接口"})
 
-    def _send_text(self, code, text):
-        data = (text + "\n").encode()
+    def _send_text(self, code, text, enc="utf8"):
+        """纯文本响应。enc=gb2312 给 SYN6288 / XFS5152 这类中文 TTS 模块直接可用。"""
+        cs = "gb2312" if str(enc).lower() in ("gb2312", "gbk") else "utf-8"
+        try:
+            data = (text + "\n").encode(cs)
+        except Exception:
+            cs, data = "utf-8", (text + "\n").encode("utf-8")   # 生僻字/emoji 编不进 gb2312 时兜底
         self.send_response(code)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Type", "text/plain; charset=" + cs)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -3359,6 +3834,8 @@ class Handler(BaseHTTPRequestHandler):
         mcu_tok = (CFG.get("mcu") or {}).get("token") or CFG["token"]
         if tok not in (CFG["token"], mcu_tok):
             print(f"[mcu] {self.client_address[0]} token 不对", flush=True)
+            audit("auth_fail", target="/api/mcu", actor=self._client(),
+                  result="denied", note="单片机 token 不对")
             return self._send_text(401, "err:token")
         dev = (g("d") or "").strip()
         # ⑤ 可选的校验和与序号（单片机稳一点）：
@@ -3390,7 +3867,7 @@ class Handler(BaseHTTPRequestHandler):
             _m = {"seq": seq} if seq else {}
             items.append({"device": dev, "metric": m, "value": num if isinstance(num, (int, float)) else None,
                           "unit": unit, "source": "mcu", "meta": _m})
-        print(f"[mcu] {dev} ← " + " ".join(f"{m}={v}" for m, v in zip(metrics, vals)), flush=True)
+        print(f"[mcu] {dev} ← " + " ".join(f"{m}={v}" for m, v in zip(metrics, vals, strict=False)), flush=True)
         # 直接复用 /ingest 的入库逻辑（它自己会回响应 —— 单片机只看 HTTP 200 就够了）
         return self._ingest(items)
 
@@ -3434,6 +3911,64 @@ class Handler(BaseHTTPRequestHandler):
             "care": care_now(),          # ★ 新增数据源（天气/在听/电量/闹钟/快递/温湿度/游戏）
             "devices": devs,
         })
+
+
+    # ───────── 屏幕 / 音箱类设备的下发口（STM32、ESP32、树莓派小屏都通用）─────────
+    # 设计取舍：单片机解析不了 JSON，也做不了 TLS → 这里只回**一行纯文本**，
+    # 由局域网中继（mcu_relay.py）用 HTTPS 代它说话。设备用独立 mcu token，别给主 token。
+    def _speakable(self, text: str) -> str:
+        """把"给人看的话"变成"能念出来的话"：
+        去掉（动作/情绪）标注、去掉 markdown 与 emoji、按句号截断到 ~120 字。
+        —— 念出来的东西不该带动作标注，跟人设里"不许假装做物理动作"是同一条规矩。
+        """
+        import re as _re
+        t = _re.sub(r"[（(][^）)]{1,12}[）)]", "", text or "")
+        t = _re.sub(r"[*_`#>\[\]]", "", t)
+        t = _re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", "", t)
+        t = _re.sub(r"\s+", " ", t).strip()
+        if len(t) > 120:
+            cut = max(t.rfind("。", 0, 120), t.rfind("！", 0, 120), t.rfind("？", 0, 120))
+            t = t[:cut + 1] if cut > 40 else t[:120]
+        return t
+
+    def _mcu_auth(self, q) -> bool:
+        tok = (q.get("t") or [""])[0] or (self.headers.get("X-Token") or "")
+        mcu = (CFG.get("mcu") or {}).get("token") or ""
+        return bool(tok) and tok in (CFG.get("token"), mcu)
+
+    def _mcu_inbox(self, q):
+        """设备取一条要提醒的内容。回一行：ok|<id>|<文本> / none / err:token
+
+        · peek=1  只看不消费（调试用）
+        · enc=gb2312  给 SYN6288 这类中文 TTS 模块直接可用（默认 utf8）
+        · 同时把设备心跳记进 terminals（这样 hubctl devices 能看到屏幕设备活着）
+        """
+        if not self._mcu_auth(q):
+            return self._send_text(401, "err:token")
+        dev = ((q.get("d") or ["mcu"])[0] or "mcu")[:24]
+        peek = (q.get("peek") or ["0"])[0].lower() not in ("0", "", "false", "no")
+        enc = (q.get("enc") or ["utf8"])[0].lower()
+        self._touch("screen:" + dev)
+        with db() as c:
+            row = c.execute("SELECT * FROM reminders WHERE status='new' ORDER BY id ASC LIMIT 1").fetchone()
+            if row is None:
+                return self._send_text(200, "none", enc=enc)
+            text = self._speakable(row["text"] or "")
+            if not peek:
+                c.execute("UPDATE reminders SET status='delivered', delivered_to=? WHERE id=?", (dev, row["id"]))
+        return self._send_text(200, "ok|%s|%s" % (row["id"], text), enc=enc)
+
+    def _mcu_ack(self, q):
+        """设备念完了回执（可选）：ok|<id> → 标记 spoken，便于统计"真的念了几条"。"""
+        if not self._mcu_auth(q):
+            return self._send_text(401, "err:token")
+        rid = (q.get("id") or [""])[0]
+        if not rid.isdigit():
+            return self._send_text(400, "err:id")
+        with db() as c:
+            c.execute("UPDATE reminders SET status='spoken' WHERE id=?", (int(rid),))
+        return self._send_text(200, "ok")
+
 
     def _pending(self, q):
         term = (q.get("for") or q.get("terminal") or [""])[0]
@@ -3503,40 +4038,393 @@ class Handler(BaseHTTPRequestHandler):
             c.execute("INSERT INTO chats(ts, terminal, role, text) VALUES (?,?,?,?)", (now_iso(), term, "persona", reply))
         return self._send(200, {"ok": True, "reply": reply, "persona": p})
 
-    def _page(self):
-        """极简状态页：浏览器打开就能看今天（也算是又一个终端）。"""
+    # ---------------------------------------------------------------- 一次性配对（MCU/新设备）
+    def _pair(self, query):
+        """设备友好的一次性配对：GET /api/pair?c=码&d=设备名 → **第一行就是 token**（或 err:xxx）。
+
+        为什么回纯文本：单片机不用解析 JSON，一行 strtok 就够。
+        码是**一次性**的 —— 换过即废，所以设备侧该存下来的是 token，不是码。
+        """
+        q = parse_qs(query)
+        g = lambda k: (q.get(k) or [""])[0]
+        code = g("c") or g("code")
+        dev = g("d") or g("device") or "mcu"
+        ok, res = pair_claim(code, dev, actor=self._client())
+        if not ok:
+            return self._send_text(400, "err:" + str(res.get("err")))
+        print(f"[pair] {dev} 用一次性码换到 token", flush=True)
+        return self._send_text(200, res["token"])
+
+    # ---------------------------------------------------------------- 管理台（登录 / 会话）
+    def _logged_in(self, q):
+        return ((self.headers.get("X-Token") or "") == CFG["token"]
+                or (self._cookie_sess() != "" and self._cookie_sess() == admin_session()))
+
+    def _login(self, q):
+        if self._logged_in(q):
+            return self._admin_page(q)
+        return self._send(200, login_html(CFG["persona"]["name"]), "text/html; charset=utf-8")
+
+    def _logout(self):
+        audit("logout", actor=self._client(), note="退出管理台")
+        self.send_response(303)
+        self.send_header("Set-Cookie", "whale_admin=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+        self.send_header("Location", "/login")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _login_post(self):
+        form = self._form()
+        tok = str(form.get("token") or self.headers.get("X-Token") or "")
+        if tok != CFG["token"]:
+            audit("login", actor=self._client(), result="denied", note="口令不对")
+            return self._send(401, login_html(CFG["persona"]["name"], "口令不对，再试一次"),
+                              "text/html; charset=utf-8")
+        audit("login", actor=self._client(), note="登录管理台")
+        self.send_response(303)
+        self.send_header("Set-Cookie",
+                         "whale_admin=%s; Path=/; HttpOnly; SameSite=Strict" % admin_session())
+        self.send_header("Location", "/admin")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _form(self):
+        """解析表单体（浏览器 <form> 用 urlencoded；也容忍 JSON）。不引任何前端框架。"""
         try:
-            with db() as c:
-                rem = c.execute("SELECT * FROM reminders WHERE day=? ORDER BY id DESC LIMIT 10",
-                                (today_str(),)).fetchall()
-                devs = c.execute("SELECT device, MAX(ts) last, COUNT(*) n FROM metrics GROUP BY device").fetchall()
+            n = int(self.headers.get("Content-Length") or 0)
         except Exception:
-            rem, devs = [], []
-        p = CFG["persona"]
-        try:
-            _c = courses_on(datetime.now(TZ).date())
-        except Exception:
-            _c = []
-        cls = "".join(f"<li>{c['start']}–{c['end']} <b>{c['name']}</b> {c['room']}</li>" for c in _c) \
-            or "<li class=muted>当天没有课（或还没同步课表）</li>"
-        rows = "".join(
-            f"<li><b>{r['level']}</b> {r['text'].replace(chr(10), '<br>')}</li>" for r in rem) or "<li>今天还没有提醒</li>"
-        dvs = "".join(f"<tr><td>{d['device']}</td><td>{d['last']}</td><td>{d['n']}</td></tr>" for d in devs) \
-            or "<tr><td colspan=3>还没有任何设备上报</td></tr>"
-        html = f"""<!doctype html><meta charset=utf-8><title>hub · {p['name']}</title>
-<style>body{{font:14px/1.7 -apple-system,"PingFang SC",sans-serif;background:#0d0e10;color:#e6e6e6;padding:24px;max-width:760px;margin:auto}}
-h1{{font-size:18px}} .muted{{color:#8b9099}} li{{margin:6px 0}} table{{border-collapse:collapse;width:100%}}
-td,th{{border-bottom:1px solid #2a2e34;padding:6px 4px;text-align:left;font-size:13px}}</style>
-<h1>{p['name']} · 中枢状态</h1>
-<p class=muted>v{VERSION} · {now_iso()} · 数据只存在这台服务器上</p>
-<h3>今天课程</h3><ul>{cls}</ul>
-<h3>今天的提醒</h3><ul>{rows}</ul>
-<h3>数据源（各设备最近上报）</h3><table><tr><th>设备</th><th>最近</th><th>条数</th></tr>{dvs}</table>
-<p class=muted>给 AI 的数据已脱敏（<a href="/llm-preview">看会发给模型的内容</a>（需带 X-Token 请求头访问））：不含通知原文 / 日程标题 / App 名 / 分钟级时间</p>
-<p class=muted>接口：POST /ingest ｜ GET /today ｜ GET /pending ｜ GET /persona ｜ GET /devices（都要 token）</p>"""
-        return self._send(200, html.replace("", CFG["token"]), "text/html; charset=utf-8")
+            n = 0
+        if not n:
+            return {}
+        raw = self.rfile.read(min(n, MAX_BODY)).decode("utf-8", "replace")
+        if "json" in (self.headers.get("Content-Type") or "").lower():
+            try:
+                d = json.loads(raw)
+                return d if isinstance(d, dict) else {}
+            except Exception:
+                return {}
+        return {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
+
+    def _admin_page(self, q):
+        """★ 这里原来是**免鉴权**的极简状态页（公网谁都能看到今天的提醒与设备名）。
+
+        现在：没登录只给登录页；登录后是管理台（同一套 token，不额外造一套权限）。
+        """
+        if not self._logged_in(q):
+            audit("auth_fail", target="/admin", actor=self._client(),
+                  result="denied", note="未登录访问管理台")
+            return self._send(401, login_html(CFG["persona"]["name"]), "text/html; charset=utf-8")
+        return self._send(200, admin_html(), "text/html; charset=utf-8")
+
+    def _admin_post(self, q):
+        if not self._auth(q):
+            return
+        form = self._form()
+        ok, msg = admin_apply(form, actor=self._client())
+        audit("config_change", target=str(form.get("section") or "admin")[:40],
+              actor=self._client(), result="ok" if ok else "denied", note=str(msg)[:100])
+        return self._send(200 if ok else 400, admin_html(flash=msg, ok=ok),
+                          "text/html; charset=utf-8")
+# ---------------------------------------------------------------- Web 管理台（标准库拼 HTML）
+# 设计取舍：
+#   · **不引前端框架**（vue/react/alpine 都不引）—— 一旦引了，"零依赖"这条卖点就没了，
+#     而且静态资源要单独分发。这里就用 <form> + 一点内联 CSS，够用。
+#   · **鉴权与 API 完全同一套 token**：登录页把 token 换成一个 HttpOnly 会话 cookie
+#     （SameSite=Strict，抗 CSRF），API 侧仍然只认 X-Token 头，不因为"是网页"就放松。
+#   · 能改的只有"开关与人设"这类**可逆**配置；删除/导出这类破坏性动作仍然只在 CLI（hubctl）。
+import hashlib
+import hmac
+
+_COOKIE_SEED = b"whale-admin-session-v1"
 
 
+def admin_session():
+    """管理台会话值 = HMAC(token)。好处：**轮换 token 会顺带废掉所有旧会话**。"""
+    return hmac.new(str(CFG.get("token") or "").encode(), _COOKIE_SEED, hashlib.sha256).hexdigest()[:32]
+
+
+def _e(x):
+    import html as _h
+    return _h.escape(str(x if x is not None else "—"))
+
+
+_CSS = """
+:root{color-scheme:dark}
+body{background:#0e1116;color:#dfe6ee;font:14px/1.6 -apple-system,"Segoe UI","PingFang SC",sans-serif;margin:0;padding:20px 22px 60px}
+h1{font-size:17px;margin:0 0 2px}h2{font-size:14px;margin:26px 0 8px;color:#8ea1b5;font-weight:600}
+a{color:#6cb6ff;text-decoration:none}a:hover{text-decoration:underline}
+table{border-collapse:collapse;width:100%}td,th{padding:6px 10px;border-bottom:1px solid #1c2431;text-align:left;font-size:13px}
+th{color:#8ea1b5;font-weight:600}.dim{color:#7c8b9c}.warn{color:#f0a35e}.bad{color:#ef6f6f}.ok{color:#5fd38a}
+ul{margin:0;padding-left:18px}li{margin:2px 0}
+.tag{display:inline-block;padding:1px 7px;border:1px solid #2b3646;border-radius:9px;color:#8ea1b5;font-size:12px}
+.card{border:1px solid #1c2431;border-radius:10px;padding:12px 14px;margin:8px 0;background:#12161d}
+label{display:inline-block;min-width:150px;color:#a9b7c6}
+input,select{background:#0b0e13;border:1px solid #2b3646;color:#dfe6ee;border-radius:6px;padding:5px 8px;font:13px/1.4 inherit}
+input[type=submit]{background:#1d4e86;border-color:#2a6bb0;cursor:pointer;padding:6px 14px}
+input[type=submit]:hover{background:#245da0}
+.row{margin:6px 0}
+.flash{border-left:3px solid #5fd38a;background:#12201a;padding:8px 12px;border-radius:6px;margin:10px 0}
+.flash.bad{border-color:#ef6f6f;background:#201414}
+.grid{display:flex;flex-wrap:wrap;gap:14px}.grid>.card{flex:1 1 320px}
+"""
+
+
+def login_html(name="鲸鲸", err=""):
+    return ("""<!doctype html><html lang=zh><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>登录 · __NAME__ 中枢</title><style>__CSS__</style>
+<h1>__NAME__ · 中枢管理台</h1>
+<div class=dim>这个页面能看到你的数据，所以要先验证 —— 口令就是 hub.json 里的 token。</div>
+__ERR__
+<form class=card method=post action=/login>
+<div class=row><label>token</label><input type=password name=token autofocus size=34></div>
+<div class=row><input type=submit value=登录></div>
+</form>
+<p class=dim>命令行里也能看：<code>hubctl status</code> · <code>hubctl token</code>。浏览器登录后会种一个 HttpOnly cookie，
+换 token 即失效；API 侧仍然只认 X-Token 头。</p>
+"""
+            .replace("__CSS__", _CSS)
+            .replace("__NAME__", _e(name))
+            .replace("__ERR__", ('<div class="flash bad">%s</div>' % _e(err)) if err else ""))
+
+
+def admin_html(flash="", ok=True):
+    # ---- 概览
+    try:
+        with db() as c:
+            n_metrics = c.execute("SELECT COUNT(*) n FROM metrics").fetchone()["n"]
+            n_rem = c.execute("SELECT COUNT(*) n FROM reminders").fetchone()["n"]
+            n_dev = c.execute("SELECT COUNT(DISTINCT device) n FROM metrics").fetchone()["n"]
+    except Exception:
+        n_metrics = n_rem = n_dev = 0
+    head = ("<h1>%s · 中枢管理台 <span class=tag>v%s</span></h1>"
+            "<div class=dim>%s ｜ 代码指纹 %s ｜ 数据点 %s ｜ 设备 %s ｜ 提醒 %s</div>"
+            % (_e(CFG["persona"]["name"]), _e(VERSION), _e(now_iso()),
+               _e(code_fingerprint()), n_metrics, n_dev, n_rem))
+
+    # ---- 数据源健康度
+    rows = []
+    try:
+        for s, v in source_health().items():
+            cls = "ok" if v["verdict"] == "ok" else "warn"
+            rows.append("<tr><td>%s</td><td class=%s>%s</td><td>%s</td><td class=dim>%s</td></tr>"
+                        % (_e(s), cls, _e(v["verdict"]), _e(v.get("today_n")), _e(v.get("note"))))
+    except Exception as e:
+        rows.append("<tr><td colspan=4>健康度算不出：%s</td></tr>" % _e(str(e)[:80]))
+    health = ("<h2>数据源健康度</h2><table><tr><th>源</th><th>状态</th><th>今天</th><th>说明</th></tr>%s</table>"
+              % ("".join(rows) or "<tr><td colspan=4 class=dim>还没有数据源</td></tr>"))
+
+    # ---- 开关（care / privacy / rules）
+    care = CFG.get("care") or {}
+    priv = CFG.get("privacy") or {}
+    rules = CFG.get("rules") or {}
+    qh = care.get("quiet_hours") or [23, 7]
+
+    def yn(v):
+        return "是" if v else "否"
+    switches = """<h2>开关</h2>
+<form class=card method=post action=/admin><input type=hidden name=section value=care>
+<div class=row><label>主动关心总开关</label><select name=enabled><option value=1 __CE__>开</option><option value=0 __CD__>关</option></select></div>
+<div class=row><label>天气关心</label><select name=weather><option value=1 __WE__>开</option><option value=0 __WD__>关</option></select></div>
+<div class=row><label>免打扰起（时）</label><input name=quiet_from type=number min=0 max=23 value="__QF__"></div>
+<div class=row><label>免打扰止（时）</label><input name=quiet_to type=number min=0 max=23 value="__QT__"></div>
+<div class=row><label>每天主动上限（条）</label><input name=daily_max type=number min=0 max=50 value="__DM__"></div>
+<div class=row><label>两条最小间隔（分钟）</label><input name=min_gap type=number min=1 max=600 value="__MG__"></div>
+<div class=row><input type=submit value="保存开关"></div></form>
+
+<form class=card method=post action=/admin><input type=hidden name=section value=privacy>
+<div class=row><label>脱敏总开关</label><select name=priv_enabled><option value=1 __PE__>开</option><option value=0 __PD__>关</option></select></div>
+<div class=row><label>保存通知原文（排障用）</label><select name=store_raw><option value=1 __RE__>开</option><option value=0 __RD__>关</option></select></div>
+<div class=row><label>保留天数（0=永久）</label><input name=retention type=number min=0 max=3650 value="__RT__"></div>
+<div class=row><input type=submit value="保存隐私设置"></div></form>
+
+<form class=card method=post action=/admin><input type=hidden name=section value=rules>
+<div class=row><label>连续活跃提醒（分钟）</label><input name=sit type=number min=10 max=300 value="__SIT__"></div>
+<div class=row><label>屏幕过高阈值（分钟）</label><input name=screen type=number min=60 max=1440 value="__SCR__"></div>
+<div class=row><label>睡眠不足阈值（分钟）</label><input name=sleep type=number min=60 max=900 value="__SLP__"></div>
+<div class=row><label>设备离线提醒（小时）</label><input name=offline type=number min=1 max=240 value="__OFF__"></div>
+<div class=row><label>课前提醒（分钟，0=关）</label><input name=cls type=number min=0 max=120 value="__CLS__"></div>
+<div class=row><input type=submit value="保存规则"></div></form>
+""".replace("__CE__", "selected" if care.get("enabled") else "").replace("__CD__", "" if care.get("enabled") else "selected") \
+   .replace("__WE__", "selected" if care.get("weather") else "").replace("__WD__", "" if care.get("weather") else "selected") \
+   .replace("__QF__", _e(qh[0])).replace("__QT__", _e(qh[1])) \
+   .replace("__DM__", _e(care.get("daily_max"))).replace("__MG__", _e(care.get("min_gap_minutes"))) \
+   .replace("__PE__", "selected" if priv.get("enabled", True) else "").replace("__PD__", "" if priv.get("enabled", True) else "selected") \
+   .replace("__RE__", "selected" if priv.get("store_raw_text") else "").replace("__RD__", "" if priv.get("store_raw_text") else "selected") \
+   .replace("__RT__", _e(priv.get("retention_days"))) \
+   .replace("__SIT__", _e(rules.get("sit_continuous_minutes"))).replace("__SCR__", _e(rules.get("screen_high_minutes"))) \
+   .replace("__SLP__", _e(rules.get("sleep_low_minutes"))).replace("__OFF__", _e(rules.get("device_offline_hours"))) \
+   .replace("__CLS__", _e(rules.get("class_remind_minutes")))
+
+    # ---- 人设
+    p = CFG["persona"]
+    persona = """<h2>人设（改这里 = 三端同步）</h2>
+<form class=card method=post action=/admin><input type=hidden name=section value=persona>
+<div class=row><label>名字</label><input name=name size=20 value="__N__"></div>
+<div class=row><label>自称</label><input name=self_call size=20 value="__SC__"></div>
+<div class=row><label>怎么称呼你</label><input name=call_user size=20 value="__CU__"></div>
+<div class=row><label>喜欢</label><input name=likes size=30 value="__LK__"></div>
+<div class=row><label>禁忌</label><input name=taboo size=30 value="__TB__"></div>
+<div class=row><label>语气</label><input name=tone size=60 value="__TN__"></div>
+<div class=row><label>文体要求</label><input name=style size=60 value="__ST__"></div>
+<div class=row><input type=submit value="保存人设"></div></form>
+""".replace("__N__", _e(p.get("name"))).replace("__SC__", _e(p.get("self_call"))) \
+   .replace("__CU__", _e(p.get("call_user"))).replace("__LK__", _e(p.get("likes"))) \
+   .replace("__TB__", _e(p.get("taboo"))).replace("__TN__", _e(p.get("tone"))) \
+   .replace("__ST__", _e(p.get("style")))
+
+    # ---- 配对码
+    pairs = []
+    try:
+        for c_ in pair_list(8):
+            state = "已用" if c_["used_at"] else ("已过期" if c_["expires_at"] < now_iso() else "待用")
+            pairs.append("<tr><td>%s</td><td>%s</td><td>%s</td><td class=dim>%s</td></tr>"
+                         % (_e(c_["code"]), _e(c_["device"] or "(任意)"), _e(state), _e(c_["created_at"][:16])))
+    except Exception:
+        pass
+    pair_block = ("<h2>设备配对（一次性码）</h2>"
+                  "<form class=card method=post action=/admin><input type=hidden name=section value=pair>"
+                  "<div class=row><label>设备名（可留空）</label><input name=device size=20 placeholder=stm32_room></div>"
+                  "<div class=row><input type=submit value=\"生成配对码\"></div></form>"
+                  "<table><tr><th>码</th><th>设备</th><th>状态</th><th>生成</th></tr>%s</table>"
+                  % ("".join(pairs) or "<tr><td colspan=4 class=dim>还没有配对码</td></tr>"))
+
+    # ---- 外挂扩展 / 决策 / 审计
+    ext = "".join("<li>%s → 上次入库 %s 条%s</li>"
+                  % (_e(s["name"]), _e(s["last_n"]),
+                     (" ｜ <span class=warn>%s</span>" % _e(s["last_err"])) if s["last_err"] else "")
+                  for s in EXT["sources"])
+    ext_block = ("<h2>外挂扩展</h2><ul>%s</ul>"
+                 % (ext or "<li class=dim>（没装扩展）</li>"))
+
+    dec = []
+    try:
+        with db() as c:
+            for d in c.execute("SELECT ts, band, gap_sec, reason FROM decisions "
+                               "ORDER BY id DESC LIMIT 10").fetchall():
+                dec.append("<li><span class=dim>%s</span> %s ｜ %s 分钟 ｜ %s</li>"
+                           % (_e(d["ts"][11:16]), _e(d["band"]), _e(round((d["gap_sec"] or 0) / 60.0)),
+                              _e(d["reason"])))
+    except Exception:
+        pass
+    dec_block = ("<h2>决策日志（她为什么这么频繁）</h2><ul>%s</ul>"
+                 % ("".join(dec) or "<li class=dim>（还没有）</li>"))
+
+    au = []
+    try:
+        for a in audit_recent(30):
+            cls = {"denied": "warn", "error": "bad"}.get(a["result"], "dim")
+            au.append("<tr><td class=dim>%s</td><td>%s</td><td>%s</td><td class=%s>%s</td><td class=dim>%s</td></tr>"
+                      % (_e(a["ts"][5:16]), _e(a["action"]), _e(a["target"]), cls,
+                         _e(a["result"]), _e(a["note"])))
+    except Exception:
+        pass
+    try:
+        st = audit_stats()
+        au_stat = "近 7 天共 %s 条 ｜ 鉴权失败 %s ｜ 配置修改 %s" % (st["total"], st["auth_fail"], st["config_change"])
+    except Exception:
+        au_stat = ""
+    audit_block = ("<h2>审计日志 <span class=tag>只记动作，不记内容</span></h2>"
+                   "<div class=dim>%s</div>"
+                   "<table><tr><th>时间</th><th>动作</th><th>对象</th><th>结果</th><th>说明</th></tr>%s</table>"
+                   % (_e(au_stat), "".join(au) or "<tr><td colspan=5 class=dim>（还没有）</td></tr>"))
+
+    links = ("<h2>其他</h2><div class=dim>"
+             "<a href=/dash>只读数据页 /dash</a> ｜ "
+             "<a href=/llm-preview>看会发给模型的内容 /llm-preview</a> ｜ "
+             "<a href=/audit>审计 JSON /audit</a> ｜ "
+             "<a href=/health>健康 /health</a> ｜ <a href=/logout>退出</a></div>"
+             "<div class=dim style='margin-top:6px'>破坏性动作（导出/删除/备份还原）只在命令行："
+             "<code>hubctl dump | prune | backup | restore</code> —— 网页端刻意不做，少一处被误触的面。</div>")
+
+    return ("""<!doctype html><html lang=zh><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>__NAME__ · 管理台</title><style>__CSS__</style>
+__HEAD____FLASH__
+<div class=grid><div>__HEALTH____DEC__</div><div>__SW____PAIR__</div></div>
+__PERSONA____EXT____AUDIT____LINKS__
+""".replace("__CSS__", _CSS).replace("__NAME__", _e(CFG["persona"]["name"])).replace("__HEAD__", head)
+       .replace("__FLASH__", ('<div class="flash%s">%s</div>' % ("" if ok else " bad", _e(flash))) if flash else "")
+       .replace("__HEALTH__", health).replace("__DEC__", dec_block)
+       .replace("__SW__", switches).replace("__PAIR__", pair_block)
+       .replace("__PERSONA__", persona).replace("__EXT__", ext_block)
+       .replace("__AUDIT__", audit_block).replace("__LINKS__", links))
+
+
+def _num(form, key, cast=int, default=None, lo=None, hi=None):
+    try:
+        v = cast(form.get(key))
+    except Exception:
+        return default
+    if lo is not None and v < lo:
+        return default
+    if hi is not None and v > hi:
+        return default
+    return v
+
+
+def _flag(form, key):
+    return str(form.get(key) or "").strip() in ("1", "on", "true", "yes")
+
+
+def admin_apply(form, actor=""):
+    """执行管理台提交。返回 (ok, 人话说明)。**只动可逆配置**，改完立刻写 hub.json。"""
+    if not isinstance(form, dict) or not form:
+        return False, "空提交"
+    sec = str(form.get("section") or "")
+    if sec == "persona":
+        p = CFG.setdefault("persona", {})
+        for k in ("name", "self_call", "call_user", "likes", "taboo", "tone", "style"):
+            if k in form and str(form[k]).strip():
+                p[k] = str(form[k]).strip()[:400]
+        _save_cfg()
+        return True, "人设已保存（三端共用同一份）"
+    if sec == "care":
+        c_ = CFG.setdefault("care", {})
+        c_["enabled"] = _flag(form, "enabled")
+        c_["weather"] = _flag(form, "weather")
+        qf, qt = _num(form, "quiet_from", lo=0, hi=23), _num(form, "quiet_to", lo=0, hi=23)
+        if qf is not None and qt is not None:
+            c_["quiet_hours"] = [qf, qt]
+        dm = _num(form, "daily_max", lo=0, hi=50)
+        mg = _num(form, "min_gap", lo=1, hi=600)
+        if dm is not None:
+            c_["daily_max"] = dm
+        if mg is not None:
+            c_["min_gap_minutes"] = mg
+        _save_cfg()
+        return True, "开关已保存"
+    if sec == "privacy":
+        pv = CFG.setdefault("privacy", {})
+        pv["enabled"] = _flag(form, "priv_enabled")
+        pv["store_raw_text"] = _flag(form, "store_raw")
+        rt = _num(form, "retention", lo=0, hi=3650)
+        if rt is not None:
+            pv["retention_days"] = rt
+        _save_cfg()
+        return True, "隐私设置已保存"
+    if sec == "rules":
+        r_ = CFG.setdefault("rules", {})
+        for key, name, lo, hi in (("sit", "sit_continuous_minutes", 10, 300),
+                                  ("screen", "screen_high_minutes", 60, 1440),
+                                  ("sleep", "sleep_low_minutes", 60, 900),
+                                  ("offline", "device_offline_hours", 1, 240),
+                                  ("cls", "class_remind_minutes", 0, 120)):
+            v = _num(form, key, lo=lo, hi=hi)
+            if v is not None:
+                r_[name] = v
+        _save_cfg()
+        return True, "规则已保存"
+    if sec == "pair":
+        info = pair_new(str(form.get("device") or "").strip())
+        return True, ("配对码 %s（%d 分钟内有效，**只能用一次**）—— 设备侧："
+                      "curl -sk 'https://<中枢>:11443/api/pair?c=%s&d=<设备名>'" % (info["code"], info["ttl_minutes"], info["code"]))
+    return False, "不认识的 section：%s" % sec
+
+
+def _save_cfg():
+    with open(CFG_PATH, "w", encoding="utf-8") as f:
+        json.dump(CFG, f, ensure_ascii=False, indent=2)
 def main():
     init_db()
     ensure_fts()          # ★ 派生索引：建/自愈重建，失败不影响主流程

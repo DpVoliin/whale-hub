@@ -279,6 +279,11 @@ class Handler(BaseHTTPRequestHandler):
         #   回一行纯文本 ok / err:xxx —— 单片机不用解析 JSON
         if self.path.startswith("/api/mcu"):
             return self._mcu(urlparse(self.path).query)
+        # 屏幕/音箱类设备的下发口（同样允许 query token：单片机上带自定义 header 很麻烦）
+        if self.path.startswith("/mcu/inbox"):
+            return self._mcu_inbox(parse_qs(urlparse(self.path).query))
+        if self.path.startswith("/mcu/ack"):
+            return self._mcu_ack(parse_qs(urlparse(self.path).query))
         if self.path.startswith("/api/pair"):
             return self._pair(urlparse(self.path).query)     # 设备友好：换回来是一行纯文本
 
@@ -565,10 +570,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._chat(self._body())
         return self._send(404, {"error": "没有这个接口"})
 
-    def _send_text(self, code, text):
-        data = (text + "\n").encode()
+    def _send_text(self, code, text, enc="utf8"):
+        """纯文本响应。enc=gb2312 给 SYN6288 / XFS5152 这类中文 TTS 模块直接可用。"""
+        cs = "gb2312" if str(enc).lower() in ("gb2312", "gbk") else "utf-8"
+        try:
+            data = (text + "\n").encode(cs)
+        except Exception:
+            cs, data = "utf-8", (text + "\n").encode("utf-8")   # 生僻字/emoji 编不进 gb2312 时兜底
         self.send_response(code)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Type", "text/plain; charset=" + cs)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -659,6 +669,64 @@ class Handler(BaseHTTPRequestHandler):
             "care": care_now(),          # ★ 新增数据源（天气/在听/电量/闹钟/快递/温湿度/游戏）
             "devices": devs,
         })
+
+
+    # ───────── 屏幕 / 音箱类设备的下发口（STM32、ESP32、树莓派小屏都通用）─────────
+    # 设计取舍：单片机解析不了 JSON，也做不了 TLS → 这里只回**一行纯文本**，
+    # 由局域网中继（mcu_relay.py）用 HTTPS 代它说话。设备用独立 mcu token，别给主 token。
+    def _speakable(self, text: str) -> str:
+        """把"给人看的话"变成"能念出来的话"：
+        去掉（动作/情绪）标注、去掉 markdown 与 emoji、按句号截断到 ~120 字。
+        —— 念出来的东西不该带动作标注，跟人设里"不许假装做物理动作"是同一条规矩。
+        """
+        import re as _re
+        t = _re.sub(r"[（(][^）)]{1,12}[）)]", "", text or "")
+        t = _re.sub(r"[*_`#>\[\]]", "", t)
+        t = _re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", "", t)
+        t = _re.sub(r"\s+", " ", t).strip()
+        if len(t) > 120:
+            cut = max(t.rfind("。", 0, 120), t.rfind("！", 0, 120), t.rfind("？", 0, 120))
+            t = t[:cut + 1] if cut > 40 else t[:120]
+        return t
+
+    def _mcu_auth(self, q) -> bool:
+        tok = (q.get("t") or [""])[0] or (self.headers.get("X-Token") or "")
+        mcu = (CFG.get("mcu") or {}).get("token") or ""
+        return bool(tok) and tok in (CFG.get("token"), mcu)
+
+    def _mcu_inbox(self, q):
+        """设备取一条要提醒的内容。回一行：ok|<id>|<文本> / none / err:token
+
+        · peek=1  只看不消费（调试用）
+        · enc=gb2312  给 SYN6288 这类中文 TTS 模块直接可用（默认 utf8）
+        · 同时把设备心跳记进 terminals（这样 hubctl devices 能看到屏幕设备活着）
+        """
+        if not self._mcu_auth(q):
+            return self._send_text(401, "err:token")
+        dev = ((q.get("d") or ["mcu"])[0] or "mcu")[:24]
+        peek = (q.get("peek") or ["0"])[0].lower() not in ("0", "", "false", "no")
+        enc = (q.get("enc") or ["utf8"])[0].lower()
+        self._touch("screen:" + dev)
+        with db() as c:
+            row = c.execute("SELECT * FROM reminders WHERE status='new' ORDER BY id ASC LIMIT 1").fetchone()
+            if row is None:
+                return self._send_text(200, "none", enc=enc)
+            text = self._speakable(row["text"] or "")
+            if not peek:
+                c.execute("UPDATE reminders SET status='delivered', delivered_to=? WHERE id=?", (dev, row["id"]))
+        return self._send_text(200, "ok|%s|%s" % (row["id"], text), enc=enc)
+
+    def _mcu_ack(self, q):
+        """设备念完了回执（可选）：ok|<id> → 标记 spoken，便于统计"真的念了几条"。"""
+        if not self._mcu_auth(q):
+            return self._send_text(401, "err:token")
+        rid = (q.get("id") or [""])[0]
+        if not rid.isdigit():
+            return self._send_text(400, "err:id")
+        with db() as c:
+            c.execute("UPDATE reminders SET status='spoken' WHERE id=?", (int(rid),))
+        return self._send_text(200, "ok")
+
 
     def _pending(self, q):
         term = (q.get("for") or q.get("terminal") or [""])[0]
