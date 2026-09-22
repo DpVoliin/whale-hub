@@ -88,11 +88,14 @@ curl -s -H "X-Token: $TOKEN" http://127.0.0.1:11440/llm-preview | head -40
 
 ## 目录
 
+<details>
+<summary><b>点开看每个文件/目录是干什么的</b>（共 25 项）</summary>
+
 | 目录/文件 | 是什么 |
 |---|---|
 | `hub/hub.py` | 中枢：单文件 Python（零第三方依赖），HTTP + SQLite + 规则引擎 + 脱敏 + 定点提醒 |
 | `hub/hubctl.py` | 命令行工具：读数据 / 只读 SQL / 导出（可脱敏）/ 合并导入 / 备份还原 / **审计 `audit`** / **配对码 `pair`** / **schema 版本 `schema`**（v4 起有迁移框架）|
-| `hub/src/whalecare/93_channels.py` | **直发出口**：企业微信群机器人 + 通用 webhook（`POST /push`，不经 Hermes 网关） |
+| `hub/src/whalecare/93_channels.py` | **直发出口（8 个）**：企业微信/通用 webhook/ntfy/Bark/钉钉/Discord/QQ 官方机器人；不自动使用，不依赖 Hermes 网关 |
 | `speaker/whale_strategy.example.py` | **说话策略外挂**：复制成 `whale_strategy.py` 即可替换节奏与料分 |
 | `GET /`（管理台） | **Web 管理台**：标准库 HTML，零前端依赖。看数据源健康度/决策/审计，改开关与人设，生成配对码。与 API **同一套 token** |
 | `hub/hub_install.sh` | 部署脚本：只放文件 + 写 cron，靠**文件指纹变化热重启**（永不需 kill 进程）|
@@ -117,6 +120,8 @@ curl -s -H "X-Token: $TOKEN" http://127.0.0.1:11440/llm-preview | head -40
 | `docs/DEMO-SCRIPT.md` | 演示脚本（录视频/给别人看时照着走）|
 | `docs/FDROID.md` · `docs/AWESOME-SUBMISSIONS.md` | 上架/投稿材料（F-Droid、awesome-selfhosted）|
 | `docs/` | 其余：隐私设计、本地优先、路线图、扩展契约、单片机、schema |
+
+</details>
 
 ## 快速开始
 
@@ -286,6 +291,26 @@ python3 whale_speaker.py       # 常驻：定点提醒照发；其余时间自�
 两种证据按**强度加权**进 Beta 后验：`(1+Σw_成功)/(2+Σw_成功+Σw_失败)` —— 弱证据能推动、但压不过你亲手点的。
 `WHALE_IMPLICIT=0` 可关掉。
 
+## 直发出口（除微信外还能发到哪）
+
+主出口是「说话层 → 网关 webhook → 微信」。中枢另外自带 **8 个直发出口**（**不自动使用** ——
+避免和说话层重复推送，由 cron / 扩展 / 你手动调）—— 其中 6 个走各自平台的**官方接口**，
+QQ 走**官方机器人 API**，全部零第三方依赖：
+
+| 出口 | 配置键 | 说明 |
+|---|---|---|
+| 企业微信群机器人 | `channels.wecom_webhook` | 官方接口、无限流，一个地址即可 |
+| 通用 webhook | `channels.generic_webhook` | 任何接受 `POST {"text": "..."}` 的地址 |
+| 企业微信应用消息 | `channels.wecom_corpid/secret/agentid` | 可发给指定成员 |
+| **ntfy** | `channels.ntfy_url` (+`ntfy_token`) | 极简推送，文本 `POST` 到 `https://ntfy.sh/<主题>` 即达 |
+| **Bark** | `channels.bark_url` (+`bark_sound`) | iOS 极简推送，路径式 `/<key>/<标题>/<内容>` |
+| **钉钉** | `channels.dingtalk_webhook` (+`dingtalk_secret`) | 官方自定义机器人，可选官方加签 |
+| **Discord** | `channels.discord_webhook` | 官方 webhook，`{"content": ...}`，单条 2000 字内 |
+| **QQ** | `channels.qq_appid` + `qq_secret` + `qq_target` (+`qq_kind`) | **官方机器人 API**（先取 access_token 再发，不装 SDK）|
+
+看状态：`hubctl channels`（只报"配没配"，不打印地址本身 —— 那带密钥）。
+发测试：`POST /channels?test=1`。
+
 ## 部署：一条命令
 
 ```bash
@@ -327,7 +352,7 @@ hub/personas/<名字>/{persona.json, card.json}
 - **隐私边界**：基线在**中枢**算（分类逻辑本来就在中枢），只把「类别名 + 百分比」这个**结论**交给模型。
   为了让"嘴"自己算基线而把原始 App 名递过去，等于偷偷扩大隐私面。
 
-## 小设备也能接入（STM32 / C51）
+## 小设备也能接入（硬件无关的一行明文口）
 
 单片机解析不了 JSON、也做不了 TLS —— 所以**设备只说一行明文，TLS 交给内网中继**：
 
@@ -378,8 +403,8 @@ HTTP: GET /mcu?d=stm32_room&m=temp,hum&v=26.4,58&u=C   → 回 "ok"
 
 ## 路线图
 
-见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。已完成：第二批数据源、联网查询与筛查、`hubctl`。
-下一步：自然语言待办与偏好记忆、背单词/学习进度、游戏活动公告、PC 采集器、桌面常驻角色。
+主体已走完（P0/P1/P2 + 一轮外部评审的成立条目）；剩下的每一条都写清了**卡在哪**（多数是"需要账号/真机"）。完整索引见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
+下一步看两条线：① **把评测做实**（`hubctl eval` 长成公开基准 Whalecare-Bench）；② 补齐"需要账号/真机"的那些（F-Droid / demo 视频 / Health Connect / 系统勿扰传感）。
 
 ## 许可
 
@@ -391,22 +416,3 @@ MIT。拿去改成你自己的鲸鲸，随便。
 ⚠️ 这类工具会接触**通知、使用时长、健康**等敏感数据。请务必自己部署、自己掌控、
 别把中枢对公网敞开（至少 token + 防火墙白名单 + HTTPS）。
 
-## 直发出口（除微信外还能发到哪）
-
-主出口是「说话层 → 网关 webhook → 微信」。中枢另外自带 **8 个直发出口**（**不自动使用** ——
-避免和说话层重复推送，由 cron / 扩展 / 你手动调）—— 其中 6 个走各自平台的**官方接口**，
-QQ 走**官方机器人 API**，全部零第三方依赖：
-
-| 出口 | 配置键 | 说明 |
-|---|---|---|
-| 企业微信群机器人 | `channels.wecom_webhook` | 官方接口、无限流，一个地址即可 |
-| 通用 webhook | `channels.generic_webhook` | 任何接受 `POST {"text": "..."}` 的地址 |
-| 企业微信应用消息 | `channels.wecom_corpid/secret/agentid` | 可发给指定成员 |
-| **ntfy** | `channels.ntfy_url` (+`ntfy_token`) | 极简推送，文本 `POST` 到 `https://ntfy.sh/<主题>` 即达 |
-| **Bark** | `channels.bark_url` (+`bark_sound`) | iOS 极简推送，路径式 `/<key>/<标题>/<内容>` |
-| **钉钉** | `channels.dingtalk_webhook` (+`dingtalk_secret`) | 官方自定义机器人，可选官方加签 |
-| **Discord** | `channels.discord_webhook` | 官方 webhook，`{"content": ...}`，单条 2000 字内 |
-| **QQ** | `channels.qq_appid` + `qq_secret` + `qq_target` (+`qq_kind`) | **官方机器人 API**（先取 access_token 再发，不装 SDK）|
-
-看状态：`hubctl channels`（只报"配没配"，不打印地址本身 —— 那带密钥）。
-发测试：`POST /channels?test=1`。
