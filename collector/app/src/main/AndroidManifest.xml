@@ -70,7 +70,9 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
-        <!-- Android 11+ 的包可见性：不声明就**看不到**这些厂商组件 → 跳转必失败 ✗ -->
+</application>
+
+    <!-- Android 11+ 的包可见性：不声明就**看不到**这些厂商组件 → 跳转必失败 ✗ -->
     <queries>
         <package android:name="com.vivo.permissionmanager" />
         <package android:name="com.iqoo.secure" />
@@ -79,5 +81,4 @@
         <package android:name="com.huawei.systemmanager" />
         <package android:name="com.coloros.safecenter" />
     </queries>
-</application>
 </manifest>
