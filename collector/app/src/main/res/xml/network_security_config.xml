@@ -1,14 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- 全局禁止明文 HTTP：所有上报必须走 TLS -->
+    <!-- 全局禁止明文 HTTP：所有上报必须走 TLS ✓ -->
     <base-config cleartextTrafficPermitted="false" />
 
-    <!-- 只信任「鲸鲸中枢」这一张证书（证书固定）：
-         换了证书、或者有人中间人冒充网关，App 会直接拒连，不会把数据交出去 -->
-    <domain-config>
-        <domain includeSubdomains="false">YOUR_SERVER_IP</domain>
-        <trust-anchors>
-            <certificates src="@raw/hub_cert" />
-        </trust-anchors>
-    </domain-config>
+    <!-- 自签证书的信任**不在这里做** —— 改由 TlsTofu.kt 在代码里做"首次信任 + 指纹固定" ✓
+         原因：这里要按域名写 trust-anchors ✗ 而把中枢 IP 写进公开仓库不合适 ✗
+               而且证书文件带 SAN=真实 IP ✗ 打进包也一样泄露。
+         代码固定反而更强：指纹一变就拒 ✓ 与域名/CN 无关 ✓ -->
 </network-security-config>

@@ -99,6 +99,13 @@ class MainActivity : AppCompatActivity() {
             KeepAlive.openExactAlarmSettings(this)
         }
 
+        // 证书指纹：显示已固定值（可跟服务器 openssl 输出逐字核对 ✓）+ 重置入口
+        findViewById<Button>(R.id.btnResetTls).setOnClickListener {
+            TlsTofu.resetFingerprint(this)
+            refresh()
+            android.widget.Toast.makeText(this, "已重置，下次上报会重新学习中枢证书", android.widget.Toast.LENGTH_LONG).show()
+        }
+
         findViewById<Button>(R.id.btnSave).setOnClickListener {
             P.hubUrl = etHub.text.toString()
             P.token = etToken.text.toString()
@@ -169,6 +176,12 @@ class MainActivity : AppCompatActivity() {
     private fun refresh() {
         // 保活状态（每次刷新都更新 ✓ 从系统设置回来时 onResume → refresh 会走到这里）
         runCatching { findViewById<TextView>(R.id.tvKeepAlive).text = KeepAlive.statusText(this) }
+        runCatching {
+            val fp = TlsTofu.pinnedFingerprint(this)
+            findViewById<TextView>(R.id.tvTlsFp).text =
+                if (fp == null) "中枢证书指纹：还没连过（第一次成功上报后会自动记住 ✓）"
+                else "中枢证书指纹（可跟服务器核对 ✓）：\n$fp"
+        }
         val notifOn = runCatching {
             Settings.Secure.getString(contentResolver, "enabled_notification_listeners")?.contains(packageName) == true
         }.getOrDefault(false)

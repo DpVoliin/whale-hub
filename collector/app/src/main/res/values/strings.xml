@@ -23,4 +23,5 @@
     <string name="btn_autostart">② 打开自启动管理</string>
     <string name="btn_bgpower">③ 打开后台耗电管理</string>
     <string name="btn_exact_alarm">④ 允许精确闹钟</string>
+    <string name="btn_reset_tls">重置中枢证书指纹</string>
 </resources>

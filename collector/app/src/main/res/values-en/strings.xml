@@ -23,4 +23,5 @@
     <string name="btn_autostart">2. Open Auto-start manager</string>
     <string name="btn_bgpower">3. Open Background power management</string>
     <string name="btn_exact_alarm">4. Allow exact alarms</string>
+    <string name="btn_reset_tls">Reset hub certificate fingerprint</string>
 </resources>
