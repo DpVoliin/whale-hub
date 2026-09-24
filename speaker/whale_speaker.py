@@ -32,6 +32,10 @@ TOKEN = os.getenv("WHALE_TOKEN") or "YOUR_HUB_TOKEN"
 TERMINAL = "weixin"
 
 WEBHOOK_URL = "http://127.0.0.1:8644/webhooks/whale-hub"
+# ★ 运行目录：环境变量可覆盖，默认 ~/.hermes/scripts（换台机器直接能跑 ✓）
+BASE = pathlib.Path(os.getenv("WHALE_SPEAKER_DIR") or (pathlib.Path.home() / ".hermes" / "scripts"))
+BASE.mkdir(parents=True, exist_ok=True)
+
 SECRET_FILE = str(BASE / ".whale_hub_secret")
 CARD_PATH = BASE / "whale_card.json"
 _CARD_CACHE = {"at": 0.0, "card": None}

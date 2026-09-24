@@ -93,7 +93,7 @@ def simulate(sp, days: int, seed: int):
     start = datetime(2026, 9, 21, 0, 0)          # 周一
     log, stats = [], {"msgs": 0, "dups": 0, "quiet": 0, "window_bad": 0, "per_day": {},
                       "gate_blocked": 0, "cap_blocked": 0}
-    said_today, last_said = {}, None
+    last_said = None
     for d in range(days):
         date = start + timedelta(days=d)
         weekday = date.weekday() < 5
