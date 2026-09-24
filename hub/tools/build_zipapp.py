@@ -8,7 +8,7 @@
       "自托管、给技术用户用"的定位；真要裸机双端分发再考虑 PyInstaller
 
 用法：
-    python3 hub/tools/build_zipapp.py                 # 产出 dist/whalecare.pyz
+    python3 hub/tools/build_zipapp.py                 # 产出 hub/dist/whalecare.pyz
     python3 hub/tools/build_zipapp.py -o /tmp/x.pyz   # 指定输出
     python3 hub/tools/build_zipapp.py --run           # 打包后立刻试跑一次（冒烟）
 
@@ -29,7 +29,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 HUB_PY = ROOT / "hub" / "hub.py"
-DEFAULT_OUT = ROOT / "dist" / "whalecare.pyz"
+# ★ 输出到 hub/dist/，**不能放根 dist/** ——
+#   根 dist/ 是给 PyPI 发布用的，gh-action-pypi-publish 会把里面**所有**文件都当发布物，
+#   而 .pyz 不是 PyPI 认的格式 → 整个发布会失败 ✗（2026-09-24 实际踩到）
+DEFAULT_OUT = ROOT / "hub" / "dist" / "whalecare.pyz"
 
 MAIN_PY = """\
 # 入口：导入合并产物并执行 main()。
