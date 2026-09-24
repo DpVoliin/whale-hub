@@ -81,6 +81,24 @@ class MainActivity : AppCompatActivity() {
         swMusic.isChecked = P.musicTitleOn
         swOrders.isChecked = P.ordersOn
 
+        // ── 后台保活：能程序化的走官方 API，不能的跳厂商页面，状态如实显示 ✓
+        val tvKeepAlive = findViewById<TextView>(R.id.tvKeepAlive)
+        fun refreshKeepAlive() { tvKeepAlive.text = KeepAlive.statusText(this) }
+        refreshKeepAlive()
+
+        findViewById<Button>(R.id.btnBatteryExempt).setOnClickListener {
+            KeepAlive.requestIgnoreBatteryOptimizations(this)
+        }
+        findViewById<Button>(R.id.btnAutoStart).setOnClickListener {
+            KeepAlive.openAutoStart(this)
+        }
+        findViewById<Button>(R.id.btnBgPower).setOnClickListener {
+            KeepAlive.openBackgroundPower(this)
+        }
+        findViewById<Button>(R.id.btnExactAlarm).setOnClickListener {
+            KeepAlive.openExactAlarmSettings(this)
+        }
+
         findViewById<Button>(R.id.btnSave).setOnClickListener {
             P.hubUrl = etHub.text.toString()
             P.token = etToken.text.toString()
@@ -149,6 +167,8 @@ class MainActivity : AppCompatActivity() {
 
     /** 状态行：只写真信息（权限是否到位、上次上报结果、队列积压）。 */
     private fun refresh() {
+        // 保活状态（每次刷新都更新 ✓ 从系统设置回来时 onResume → refresh 会走到这里）
+        runCatching { findViewById<TextView>(R.id.tvKeepAlive).text = KeepAlive.statusText(this) }
         val notifOn = runCatching {
             Settings.Secure.getString(contentResolver, "enabled_notification_listeners")?.contains(packageName) == true
         }.getOrDefault(false)

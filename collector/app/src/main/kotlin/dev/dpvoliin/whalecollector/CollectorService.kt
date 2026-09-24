@@ -1,5 +1,7 @@
 package dev.dpvoliin.whalecollector
 
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -56,10 +58,51 @@ class CollectorService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         handler.removeCallbacks(tick)
         handler.post(tick)
+        scheduleExactWake()          // ★ 每次起来都重排一次精确唤醒（下面有说明）
         return START_STICKY
     }
 
+    /**
+     * 排一个精确唤醒 —— 这是"被系统杀掉后还能自己回来"的关键。
+     *
+     * 为什么不用普通定时：Doze/省电模式下 setRepeating 会被推迟几十分钟甚至几小时 ✗
+     * 而 setExactAndAllowWhileIdle 能在打盹时也把服务叫起来 ✓
+     * （Android 12+ 需要"闹钟与提醒"权限 ✓ 没有就退化成不精确 —— 仍然比不排好 ✓）
+     */
+    private fun scheduleExactWake() {
+        try {
+            val am = getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+            val pi = PendingIntent.getBroadcast(
+                this, 0,
+                Intent(this, WakeReceiver::class.java).setAction(ACTION_WAKE),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val at = System.currentTimeMillis() + WAKE_INTERVAL_MS
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+            } else {
+                am.setExact(AlarmManager.RTC_WAKEUP, at, pi)
+            }
+        } catch (e: Exception) {
+            // 权限不足/厂商限制：退化成不精确，也别崩 ✓
+            runCatching {
+                val am = getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+                am?.set(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + WAKE_INTERVAL_MS,
+                    PendingIntent.getBroadcast(this, 0,
+                        Intent(this, WakeReceiver::class.java).setAction(ACTION_WAKE),
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            }
+        }
+    }
+
+    /** 用户从最近任务里划掉时：立刻排一次唤醒，尽快回来 ✓（vivo 上划掉就是杀进程 ✓） */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        scheduleExactWake()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
+        scheduleExactWake()          // ★ 被回收前先排好"回来的闹钟" ✓
         handler.removeCallbacks(tick)
         runCatching { screenReceiver?.let { unregisterReceiver(it) } }
         screenReceiver = null
@@ -178,11 +221,28 @@ class CollectorService : Service() {
 }
 
 /** 开机 / 覆盖安装后自动拉起（不然重启一次就断了）。 */
+const val ACTION_WAKE = "dev.dpvoliin.whalecollector.WAKE"
+/** 唤醒间隔：比上报周期（15 分钟）略短，保证数据不积压 ✓ */
+const val WAKE_INTERVAL_MS = 10 * 60 * 1000L
+
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
         val ctx = context ?: return
         when (intent?.action) {
-            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> CollectorService.start(ctx)
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            Intent.ACTION_LOCKED_BOOT_COMPLETED,
+            "android.intent.action.QUICKBOOT_POWERON",              // 部分 ROM（含 vivo/MTK）用它
+            "com.htc.intent.action.QUICKBOOT_POWERON" -> CollectorService.start(ctx)
         }
+    }
+}
+
+
+/** 精确唤醒的落点：把服务再拉起来 ✓（服务自己在 onStartCommand 里会重排下一次） */
+class WakeReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+        val ctx = context ?: return
+        if (intent?.action == ACTION_WAKE) CollectorService.start(ctx)
     }
 }

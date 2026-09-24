@@ -7,6 +7,10 @@
     <!-- 蓝牙外设电量（Android 12+ 需要；没有也能跑，只是读不到耳机/手表电量） -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 后台保活三件套：申请电池优化豁免（官方 API）+ 精确闹钟（Android 12+ 必声明） -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
@@ -49,6 +53,15 @@
             </intent-filter>
         </service>
 
+        <!-- 精确唤醒的落点（服务被杀后靠它回来 ✓） -->
+        <receiver
+            android:name=".WakeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="dev.dpvoliin.whalecollector.WAKE" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".BootReceiver"
             android:exported="true">
@@ -57,5 +70,14 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
-    </application>
+        <!-- Android 11+ 的包可见性：不声明就**看不到**这些厂商组件 → 跳转必失败 ✗ -->
+    <queries>
+        <package android:name="com.vivo.permissionmanager" />
+        <package android:name="com.iqoo.secure" />
+        <package android:name="com.vivo.abe" />
+        <package android:name="com.miui.securitycenter" />
+        <package android:name="com.huawei.systemmanager" />
+        <package android:name="com.coloros.safecenter" />
+    </queries>
+</application>
 </manifest>

@@ -30,8 +30,8 @@ android {
         applicationId = "dev.dpvoliin.whalecollector"
         minSdk = 26
         targetSdk = 37
-        versionCode = 701
-        versionName = "0.7.1"
+        versionCode = 800
+        versionName = "0.8.0"
     }
 
     // 与岛课表同一个调试签名：以后升级能直接覆盖安装，不用卸载

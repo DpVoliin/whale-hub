@@ -18,4 +18,9 @@
     <string name="btn_perm_calendar">3. Calendar read permission</string>
     <string name="btn_import_timetable">Import timetable (pick the JSON exported by the island timetable app)</string>
     <string name="btn_stop">Stop collecting</string>
+    <string name="keepalive_title">Background survival (so data does not stop)</string>
+    <string name="btn_battery_exempt">1. Exempt from battery optimization</string>
+    <string name="btn_autostart">2. Open Auto-start manager</string>
+    <string name="btn_bgpower">3. Open Background power management</string>
+    <string name="btn_exact_alarm">4. Allow exact alarms</string>
 </resources>
