@@ -32,6 +32,11 @@ TOKEN = os.getenv("WHALE_TOKEN") or "YOUR_HUB_TOKEN"
 TERMINAL = "weixin"
 
 WEBHOOK_URL = "http://127.0.0.1:8644/webhooks/whale-hub"
+# ★ 运行目录：环境变量可覆盖，默认 ~/.hermes/scripts（换台机器直接能跑 ✓）
+# 移植时务必确认：BASE 定义在**第一次使用之前**，否则一加载就 NameError ✗
+# （2026-09-24 栽过两次：8 个测试错全是这一个根因 ✓）
+BASE = pathlib.Path(os.getenv("WHALE_SPEAKER_DIR") or (pathlib.Path.home() / ".hermes" / "scripts"))
+BASE.mkdir(parents=True, exist_ok=True)
 SECRET_FILE = str(BASE / ".whale_hub_secret")
 CARD_PATH = BASE / "whale_card.json"
 _CARD_CACHE = {"at": 0.0, "card": None}
@@ -58,8 +63,6 @@ def load_card():
     _CARD_CACHE.update(at=_t.time(), card=card)
     return card
 # ★ 运行目录：环境变量可覆盖，默认 ~/.hermes/scripts（换台机器直接能跑 ✓）
-BASE = pathlib.Path(os.getenv("WHALE_SPEAKER_DIR") or (pathlib.Path.home() / ".hermes" / "scripts"))
-BASE.mkdir(parents=True, exist_ok=True)
 
 RECENT_PATH = BASE / ".whale_said.jsonl"
 LAST_PROACTIVE = BASE / ".whale_last_proactive"
@@ -1244,7 +1247,7 @@ def topic_kind(text: str) -> str:
 def _log_decision(kind: str, gap_sec: float, reason: str, material: int, st: dict) -> None:
     """结构化决策日志：把"为什么这么决定"发到中枢落库（回放器靠它）。"""
     try:
-        import whale_adapt as _wa          # band_key() 在 whale_adapt 里
+        import whale_adapt as _wa  # band_key() 在 whale_adapt 里
         band = _wa.band_key()
     except Exception:
         band = ""
