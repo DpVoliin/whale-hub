@@ -32,10 +32,6 @@ TOKEN = os.getenv("WHALE_TOKEN") or "YOUR_HUB_TOKEN"
 TERMINAL = "weixin"
 
 WEBHOOK_URL = "http://127.0.0.1:8644/webhooks/whale-hub"
-# ★ 运行目录：环境变量可覆盖，默认 ~/.hermes/scripts（换台机器直接能跑 ✓）
-BASE = pathlib.Path(os.getenv("WHALE_SPEAKER_DIR") or (pathlib.Path.home() / ".hermes" / "scripts"))
-BASE.mkdir(parents=True, exist_ok=True)
-
 SECRET_FILE = str(BASE / ".whale_hub_secret")
 CARD_PATH = BASE / "whale_card.json"
 _CARD_CACHE = {"at": 0.0, "card": None}
@@ -246,15 +242,19 @@ def deliver(text: str):
     return ok, out[:200]
 
 
-def llm(messages, timeout=25, max_tokens=700, temperature=1.05, retries=3):
-    """调模型。★ 空回复要重试 —— 2026-09-23 的教训：
+def llm(messages, timeout=25, max_tokens=200, temperature=1.05, retries=3):
+    """调模型。**按模型特点给参数**（2026-09-24 教训的根治版）。
 
-    这个模型是**思考型**的：它会先花 token 想，再输出。长人设 + 大上下文下，
-    max_tokens=200 会被思考**吃光** → content 回来是空字符串 ✗
-    而调用方（决定说/不说）看到空前缀就判"不说" → **她一整天一句话都没发出去** ✗✗
-    （现象：日志每 42 分钟一条"决定不说（模型：空）"，连续 21 次）
+    那天线上是 deepseek-v4.1-flash —— 思考型模型：先花 token 想再输出 ✓
+    而这里只给 max_tokens=200 → 思考吃光预算 → content 回空串 ✗
+    → 调用方判"不说" → **一整天一条消息都发不出去** ✗✗（实测思考 297/365/1058 token）
 
-    修法：空回复 → max_tokens 翻三倍重试；并把 finish_reason 记进日志（下次一眼看出原因）。
+    所以现在：
+      ① 先按 model_profile 认出模型族 → 给对**参数名**（有的模型只认 max_completion_tokens ✗）
+         与**足够预算**（思考型 2400 / 非思考型 400 ✓）
+      ② 空回复或被截断 → 翻三倍重试（兜住没认出来的新模型 ✓）
+      ③ 主模型连败 → 切**备用模型**（WHALE_FALLBACK_MODEL 或 config 里的 fallback ✓）
+      ④ 全失败 → 返回空，交给调用方用自己的模板（她**永远**有话说 ✓）
     """
     import yaml
     m = (yaml.safe_load(CONFIG.read_text(encoding="utf-8")) or {}).get("model") or {}
@@ -262,39 +262,72 @@ def llm(messages, timeout=25, max_tokens=700, temperature=1.05, retries=3):
     key = m.get("api_key") or ""
     if not base or not key:
         return ""
-    mt = max_tokens
-    for attempt in range(max(1, retries)):
-        body = json.dumps({"model": m.get("default") or "deepseek-v4.1-flash",
-                           "messages": messages, "temperature": temperature,
-                           "max_tokens": mt, "top_p": 0.95}, ensure_ascii=False).encode()
-        req = urllib.request.Request(base + "/chat/completions", data=body, method="POST")
+    model = m.get("default") or "deepseek-v4.1-flash"
+    try:
+        import model_profile as _mp
+    except Exception:
+        _mp = None
+
+    def _call(model_name, budget, prof):
+        body = {"model": model_name, "messages": messages, "top_p": 0.95}
+        if _mp and prof:
+            _mp.apply_to_body(body, prof, budget, temperature)
+        else:
+            body["max_tokens"] = budget
+            body["temperature"] = temperature
+        req = urllib.request.Request(base + "/chat/completions",
+                                     data=json.dumps(body, ensure_ascii=False).encode(), method="POST")
         req.add_header("Content-Type", "application/json")
         req.add_header("Authorization", "Bearer " + key)
-        req.add_header("User-Agent", UA)                    # 不带 UA 会被 Cloudflare 403
+        req.add_header("User-Agent", UA)                 # 不带 UA 会被 Cloudflare 403
         req.add_header("Accept", "application/json")
         for k, v in (m.get("default_headers") or {}).items():
             req.add_header(k, str(v))
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8", "replace"))
+
+    prof = _mp.profile_for(model, base) if _mp else None
+    if prof:
+        _dbg(f"模型画像：{prof.describe()}")
+    mt = max(max_tokens, prof.budget if prof else 0)
+    for attempt in range(max(1, retries)):
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                data = json.loads(r.read().decode("utf-8", "replace"))
+            data = _call(model, mt, prof)
         except Exception as e:
-            _dbg(f"模型调用失败（第 {attempt + 1} 次，max_tokens={mt}）：{type(e).__name__} {str(e)[:70]}")
+            _dbg(f"模型调用失败（第 {attempt + 1} 次 · max_tokens={mt}）：{type(e).__name__} {str(e)[:70]}")
+            health_bump("errors")
             mt *= 3
             continue
         ch = (data.get("choices") or [{}])[0]
         msg = ch.get("message") or {}
         content = (msg.get("content") or "").strip()
         fr = ch.get("finish_reason")
-        # 空回复 → 重试；被长度截断 → 也重试（截断的半句话比空好不了多少，而她的话要能读）
+        if _mp and prof:
+            _mp.probe_note(ch, prof)                     # 从真实响应里学习（名字骗人就改判 ✓）
         if content and fr != "length":
             return content
         if content and fr == "length" and attempt == max(1, retries) - 1:
-            return content                    # 最后一次还是截断 → 至少把已有的给她（不丢空）
-        health_bump("model_empty")
-        _dbg(f"模型回复不完整（finish_reason={fr} · "
-             f"思考长度={len(str(msg.get('reasoning_content') or ''))} · max_tokens={mt}"
+            return content
+        _dbg(f"模型回复不完整（finish_reason={fr} · 思考长度={len(str(msg.get('reasoning_content') or ''))}"
+             f" · {prof.token_param if prof else 'max_tokens'}={mt}"
              + (f" · 已有 {len(content)} 字" if content else "") + f"）→ 第 {attempt + 2} 次加倍重试")
+        health_bump("model_empty")
         mt *= 3
+    # ★ 兜底：换一个模型再试（思考型容易空 → 备用模型建议用非思考型 ✓）
+    fb = (os.getenv("WHALE_FALLBACK_MODEL") or m.get("fallback") or "").strip()
+    if fb and fb != model:
+        _dbg(f"主模型 {model} 连败 → 切备用 {fb}")
+        fprof = _mp.profile_for(fb, base) if _mp else None
+        try:
+            data = _call(fb, max_tokens, fprof)
+            ch = (data.get("choices") or [{}])[0]
+            content = ((ch.get("message") or {}).get("content") or "").strip()
+            if content:
+                _dbg(f"备用模型 {fb} 拿到回复 ✓（{len(content)} 字）")
+                return content
+            _dbg(f"备用模型 {fb} 也返回空 ✗")
+        except Exception as e:
+            _dbg(f"备用模型调用失败：{type(e).__name__} {str(e)[:70]}")
     return ""
 
 
@@ -1211,7 +1244,7 @@ def topic_kind(text: str) -> str:
 def _log_decision(kind: str, gap_sec: float, reason: str, material: int, st: dict) -> None:
     """结构化决策日志：把"为什么这么决定"发到中枢落库（回放器靠它）。"""
     try:
-        import whale_adapt as _wa  # band_key() 在 whale_adapt 里
+        import whale_adapt as _wa          # band_key() 在 whale_adapt 里
         band = _wa.band_key()
     except Exception:
         band = ""
