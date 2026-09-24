@@ -82,6 +82,16 @@ git add hub/src/whalecare/60_analysis.py hub/hub.py
 看 [`docs/COMMUNITY.md`](docs/COMMUNITY.md) —— 那里有版本策略（什么时候算 1.0）和一批
 带**证据 + 验收标准**的小任务，每条都能直接认领。
 
+## 推送前先过门禁（**别跳**）
+
+```bash
+bash hub/tools/prepush.sh      # 五道：lint(产物+片段) · 全套测试 · 版本一致性 · 说话层一周模拟 · 片段↔产物等价
+```
+
+为什么把它写成脚本：2026-09-24 我改坏过一个文件（`BASE` 定义被覆盖），修复脚本自己写错括号
+没执行，**而我直接推了** —— 仓库里那份 speaker 一加载就 NameError，8 个测试挂、CI 红 ✗。
+顺序必须是"先验后推"，不能反着来；这个脚本把顺序固定下来。
+
 ## 开发环境
 
 ```bash

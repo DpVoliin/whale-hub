@@ -171,6 +171,8 @@ def main():
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--speaker", default=str(HERE / "whale_speaker.py"))
+    ap.add_argument("--check", action="store_true",
+                    help="回归模式：不变量被破坏就退出码非 0（CI 用）")
     a = ap.parse_args()
 
     sp = load_speaker(pathlib.Path(a.speaker))
@@ -201,8 +203,22 @@ def main():
     for ts, kind, topic, txt in log[:14]:
         print(f"   {ts.strftime('%m-%d %H:%M')}  [{kind}] {topic:<10} {txt[:44]}")
     print()
-    bad = stats["window_bad"] > 0
-    print("  判定:", "✗ 有问题（见上）" if bad else "✓ 一周内没有时段错位、没有重复打扰")
+    # ── 不变量（策略回归的判据 ✓ 都是"沉默失败"型问题的哨兵）
+    per_day = total / max(1, a.days)
+    problems = []
+    if stats["window_bad"] > 0:
+        problems.append(f"时段窗口违规 {stats['window_bad']} 次（会'早上说晚上的事' ✗）")
+    if per_day < 1.0:
+        problems.append(f"平均每天只有 {per_day:.1f} 条（可能又哑了 ✗ 检查闸门/判重/模型）")
+    if per_day > 8.0:
+        problems.append(f"平均每天 {per_day:.1f} 条（太密 ✗ 会烦人）")
+    if stats["quiet"] == 0:
+        problems.append("免打扰时段一次都没跳过（时间判断可能坏了 ✗）")
+    for pr in problems:
+        print("  ✗", pr)
+    print("  判定:", "✗ 有问题（见上）" if problems else "✓ 一周内没有时段错位、没有重复打扰、条数在合理区间")
+    if a.check and problems:
+        sys.exit(1)
     print(f"  （结果可复现：--seed {a.seed}）")
 
 

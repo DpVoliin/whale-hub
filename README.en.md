@@ -111,6 +111,31 @@ signals raise the score → speak sooner; nothing worth saying → back off (5�
 
 ---
 
+## Self-checks: it cannot go quietly silent
+
+The dangerous failure mode of a proactive agent is not a crash — it is **failing silently**:
+everything looks healthy, it just stops doing anything. On 2026-09-24 four of those happened in
+one day (empty model replies, cross-day dedup, failed acks causing repeats, stale reminders
+delivered at the wrong time). Each took thousands of log lines to find. So they are now guarded
+by **mechanisms**, not by "remembering to check":
+
+- **Model profiles** (`speaker/model_profile.py`) — reasoning vs non-reasoning models differ a lot:
+  the token parameter name (`o1/o3/gpt-5` only accept `max_completion_tokens`), the budget
+  (reasoning 2400 / plain 400), and `temperature` constraints (o-series accepts only 1).
+  Unknown names are conservatively treated as reasoning models; if a response carries
+  `reasoning_content` while the name says otherwise, the profile is corrected at runtime.
+  On top of that the call site retries with 3× budget, then falls back to a secondary model,
+  then to a template.
+- **Self-check & watchdog** — on startup it verifies hub reachability, token, model and state
+  directory. While running, if the API errors ≥5 times, the model returns empty ≥5 times, or it
+  has said nothing for ≥6 active hours **while there was material**, she sends one self-report
+  message (at most once a day; quiet hours excluded). Per-category counters cover all 11
+  "decided not to speak / dropped" exits.
+- **Policy regression gate** (`speaker/sim_week.py`) — replays a simulated week against the
+  **real functions** (with a fake clock, otherwise the per-day ledger never resets), and treats
+  "wrong-time delivery / out-of-band message rate / quiet hours broken" as invariants: it exits
+  non-zero when one breaks. Runs in CI on every push.
+
 ## Delivery channels (beyond WeChat)
 
 The primary path is *speaker → gateway webhook → WeChat*. The hub also ships its own

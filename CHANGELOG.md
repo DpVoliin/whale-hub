@@ -1,3 +1,36 @@
+## v0.1.25（说话层工程化 · 模型适配 · 策略回归门禁）
+
+### 按主流模型特点适配参数（根治"思考型模型吃光 token"）
+
+- 新增 **`speaker/model_profile.py`**：按模型族给出参数画像 —— 参数名（`o1/o3/gpt-5` 只认
+  `max_completion_tokens`）、预算（思考型 2400 / 非思考型 400）、`temperature` 约束
+  （o 系列只接受 1；`deepseek-r1` 建议不带；claude 与 `top_p` 互斥）。
+  名字认不出的模型**保守按思考型**处理（预算给大不亏，给小才会空）；运行时若响应里出现
+  `reasoning_content` 而名字未标思考型，**当场改判**。
+- `llm()` 四层保障：按画像调用 → 空/截断翻三倍重试 → 主模型连败切**备用模型**
+  （`WHALE_FALLBACK_MODEL`）→ 全失败交回调用方模板（她**永远**有话说）。
+- 实测：`deepseek-v4.1-flash` 首发即拿到完整句子（此前每次要白烧两轮重试）。
+
+### 自检与看门狗（把"她哑了"变成能被主动发现的事件）
+
+- `startup_selfcheck()`：启动时验 中枢可达 / token 有效 / 模型可达 / 状态目录可写。
+- `watchdog_check()`：接口连错 ≥5、模型返回空 ≥5、活跃时段 ≥6 小时没开口且有料 → 发一条
+  **自查消息**（每天最多一次；免打扰时段不判）。
+- `health_bump()`：逐类计数（sent / errors / model_empty / blocked-by-reason），
+  覆盖全部 11 个"不说/丢弃"出口。
+
+### 策略回归门禁
+
+- `speaker/sim_week.py`：一周模拟，调说话层**真函数**（含假时钟，否则台账跨天不重置），
+  `--check` 模式把"时段错位 / 平均条数越界 / 免打扰失效"当**不变量**校验，破了就非 0 退出。
+- CI 新增该步骤；另加 `tools/prepush.sh` 一键跑齐三道门禁（lint + 测试 + 版本一致性）。
+
+### 其他
+
+- 修 `build_zipapp.py` 默认输出污染发布目录导致 PyPI 整批失败的问题；
+  `publish.yml` 显式声明 `packages-dir: dist/`。
+- 路径全部可配置（`WHALE_SPEAKER_DIR` / `WHALE_CA` / `WHALE_ATTRIB` / `WHALE_CONFIG`）。
+
 ## v0.1.24
 
 ### 说话层（speaker/）· 沉默失败的系统性修复

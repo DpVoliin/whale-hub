@@ -1,10 +1,10 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:2f61bec5-ce5a-47c7-ac30-fe3bc3f91045",
+  "serialNumber": "urn:uuid:80f40539-eede-48b4-b850-072dd761077b",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-09-22T11:57:55Z",
+    "timestamp": "2026-09-24T03:33:12Z",
     "tools": [
       {
         "vendor": "whalecare",
@@ -14,14 +14,14 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.24",
+      "bom-ref": "pkg:generic/whalecare@0.1.25",
       "name": "whalecare",
-      "version": "0.1.24",
+      "version": "0.1.25",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "a8529a9d9b8c1eb701e22836c76e5e057271c3ae713984a819d9a00195637d17"
+          "content": "51e51c9b70a44ad7b04c7a3d0e3658d46a81a130bc3ec11eb75f5e88430f06fd"
         }
       ],
       "properties": [
@@ -31,7 +31,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "bb668b617959d7145592e0464c53b334721f62a7"
+          "value": "9d7e61da58529f74bc8066f76e01a13ff76ed2b1"
         }
       ]
     }
@@ -39,14 +39,14 @@
   "components": [
     {
       "type": "application",
-      "bom-ref": "pkg:generic/whalecare@0.1.24",
+      "bom-ref": "pkg:generic/whalecare@0.1.25",
       "name": "whalecare",
-      "version": "0.1.24",
+      "version": "0.1.25",
       "description": "个人数据中枢：单文件零依赖 Python（HTTP + SQLite + 规则引擎 + 脱敏）",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "a8529a9d9b8c1eb701e22836c76e5e057271c3ae713984a819d9a00195637d17"
+          "content": "51e51c9b70a44ad7b04c7a3d0e3658d46a81a130bc3ec11eb75f5e88430f06fd"
         }
       ],
       "properties": [
@@ -56,7 +56,7 @@
         },
         {
           "name": "whale:source-commit",
-          "value": "bb668b617959d7145592e0464c53b334721f62a7"
+          "value": "9d7e61da58529f74bc8066f76e01a13ff76ed2b1"
         }
       ]
     },
