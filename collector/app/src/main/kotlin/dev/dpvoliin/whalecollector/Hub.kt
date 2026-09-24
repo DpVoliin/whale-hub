@@ -44,7 +44,7 @@ object Hub {
     private fun doSend(context: Context, items: List<JSONObject>): String {
         val url = P.hubUrl
         if (url.isBlank() || P.token.isBlank()) return "失败：还没填中枢地址/token"
-        val conn = (URL("$url/ingest").openConnection() as HttpURLConnection).apply {
+        val conn = TlsTofu.open(context, "$url/ingest").apply {   // ★ 统一出口：套上证书固定 ✓
             requestMethod = "POST"
             connectTimeout = 8000
             readTimeout = 10000

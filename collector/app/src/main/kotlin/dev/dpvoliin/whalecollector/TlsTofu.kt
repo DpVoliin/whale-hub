@@ -50,6 +50,24 @@ object TlsTofu {
     }
 
     /**
+     * ★ 所有出网请求都从这里开 —— 别再各写各的 ✗
+     *
+     * 2026-09-24 的教训：我只给"上报"那条路套了 TLS 固定 ✗ 课表那条没套 ✓
+     * 结果"上次上报"里报的还是系统信任锚的错（Trust anchor ✗），
+     * 而 0.8.1 的包里虽然**有** TlsTofu 这个类，却**没人调用它** ✗✗
+     * —— 因为接线那处被一次反向拷贝覆盖了，而新建的文件没被覆盖 ✓
+     * 所以：统一出口 + 出包后**验证 dex 里真的引用了它** ✓（下面 main() 就是这么查的）
+     */
+    fun open(ctx: Context, url: String): java.net.HttpURLConnection {
+        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        if (url.startsWith("https", ignoreCase = true) && conn is javax.net.ssl.HttpsURLConnection) {
+            conn.sslSocketFactory = socketFactory(ctx)
+            conn.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }
+        }
+        return conn
+    }
+
+    /**
      * 给 HttpsURLConnection 用的 socket 工厂。
      *
      * 注意：主机名校验这里**关闭**（verifier 恒真）—— 因为自签证书的 CN 是 "whale-hub"，

@@ -209,7 +209,7 @@ object Collectors {
         LocalTimetable.save(c, rawJson)        // 本地也留一份：判断"是否在上课"要用
         val url = P.hubUrl
         if (url.isBlank()) return false
-        val conn = (java.net.URL("$url/timetable").openConnection() as java.net.HttpURLConnection).apply {
+        val conn = TlsTofu.open(c, "$url/timetable").apply {   // ★ 课表这条原来没套证书固定 ✗
             requestMethod = "POST"; connectTimeout = 8000; readTimeout = 10000; doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             setRequestProperty("X-Token", P.token)

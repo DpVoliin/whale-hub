@@ -189,6 +189,10 @@ class MainActivity : AppCompatActivity() {
         val calOn = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) ==
             PackageManager.PERMISSION_GRANTED
         tvStatus.text = buildString {
+            val ver = runCatching {
+                packageManager.getPackageInfo(packageName, 0).versionName
+            }.getOrDefault("?")
+            append("版本：").append(ver).append('\n')
             append("中枢：").append(if (P.hubUrl.isBlank()) "未填写" else P.hubUrl).append('\n')
             append("上传加密：").append(if (P.hubUrl.startsWith("https")) "TLS + 证书固定 ✓" else "明文（建议改 https）").append('\n')
             append("通知监听（健康）：").append(if (notifOn) "已授权 ✓" else "未授权").append('\n')
