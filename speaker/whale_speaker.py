@@ -27,13 +27,13 @@ from datetime import datetime, timedelta, timezone
 TZ = timezone(timedelta(hours=8))
 
 HUB = os.getenv("WHALE_HUB") or "https://YOUR_SERVER_IP:11443"
-CA = "/home/ubuntu/hub/tls/hub.crt"
+CA = os.getenv("WHALE_CA") or str(pathlib.Path.home() / "hub" / "tls" / "hub.crt")
 TOKEN = os.getenv("WHALE_TOKEN") or "YOUR_HUB_TOKEN"
 TERMINAL = "weixin"
 
 WEBHOOK_URL = "http://127.0.0.1:8644/webhooks/whale-hub"
-SECRET_FILE = "/home/ubuntu/.hermes/scripts/.whale_hub_secret"
-CARD_PATH = pathlib.Path("/home/ubuntu/.hermes/scripts/whale_card.json")
+SECRET_FILE = str(BASE / ".whale_hub_secret")
+CARD_PATH = BASE / "whale_card.json"
 _CARD_CACHE = {"at": 0.0, "card": None}
 
 
@@ -57,16 +57,24 @@ def load_card():
             card = {}
     _CARD_CACHE.update(at=_t.time(), card=card)
     return card
-RECENT_PATH = pathlib.Path("/home/ubuntu/.hermes/scripts/.whale_said.jsonl")
-LAST_PROACTIVE = pathlib.Path("/home/ubuntu/.hermes/scripts/.whale_last_proactive")
-CONFIG = pathlib.Path("/home/ubuntu/.hermes/config.yaml")
+# ★ 运行目录：环境变量可覆盖，默认 ~/.hermes/scripts（换台机器直接能跑 ✓）
+BASE = pathlib.Path(os.getenv("WHALE_SPEAKER_DIR") or (pathlib.Path.home() / ".hermes" / "scripts"))
+BASE.mkdir(parents=True, exist_ok=True)
+
+RECENT_PATH = BASE / ".whale_said.jsonl"
+LAST_PROACTIVE = BASE / ".whale_last_proactive"
+CONFIG = pathlib.Path(os.getenv("WHALE_CONFIG") or (BASE.parent / "config.yaml"))
 
 POLL = 2.0                     # 秒：定点/紧急的响应速度
 GAP = 1.5                      # 秒：两条之间的间隔
 QUIET = (23, 7)                # 免打扰时段（小时，跨夜）
-GAP_MIN, GAP_MAX = 5 * 60, 90 * 60
-GATE_STAMP = pathlib.Path("/opt/whale/.whale_last_gate")   # 上次"评估期望效用"的时间戳（防轮询空转刷屏）       # 主动说话的间隔上下限（秒）：最快 5 分钟，最慢 90 分钟
+# ★ 下限从 5 分钟抬到 15 分钟：料多×0.6 与"你刚在用手机"×0.6 一叠加就只剩 8~10 分钟 ✗
+#   （实测 2 小时里决定了 12 次要说话）—— 定点/紧急提醒不受这个下限影响 ✓
+GAP_MIN, GAP_MAX = 15 * 60, 90 * 60
+GATE_STAMP = BASE / ".whale_last_gate"   # 上次"评估期望效用"的时间戳（防轮询空转刷屏）       # 主动说话的间隔上下限（秒）：最快 5 分钟，最慢 90 分钟
 SAY_MAX_PER_DAY = 12                     # 每日上限（硬顶，可配置）
+# ★ 冷启动期（还没有任何反馈时）每天最多试探着说几条 —— 太少收集不到反馈，太多会烦人 ✓
+COLD_START_PER_DAY = int(os.getenv("WHALE_COLD_START_PER_DAY", "3"))
 SAY_MIN_PER_DAY = 4                      # 被 ✗ 打到底时的下限 —— 再少就变成"坏掉"了
 
 
@@ -90,7 +98,7 @@ def daily_cap(st=None):
         return int(max(SAY_MIN_PER_DAY, min(SAY_MAX_PER_DAY, cap)))
     except Exception:
         return SAY_MAX_PER_DAY
-PACE_PATH = pathlib.Path("/home/ubuntu/.hermes/scripts/.whale_pace.json")
+PACE_PATH = BASE / ".whale_pace.json"
 UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0 Safari/537.36")
 
@@ -128,7 +136,7 @@ def hub(path, payload=None):
 # 主人的"最后说话时间"只从**本机** Hermes 会话库只读读取，不外发；
 # 读不到就什么都不记 —— 宁可不学，也不冤枉她。
 IMPLICIT_ON = os.getenv("WHALE_IMPLICIT", "1").lower() not in ("0", "false", "no", "off")
-ATTRIB = pathlib.Path(os.getenv("WHALE_ATTRIB", "/opt/whale/.whale_attrib.json"))
+ATTRIB = pathlib.Path(os.getenv("WHALE_ATTRIB") or (BASE / ".whale_attrib.json"))
 HERMES_DB = pathlib.Path(os.getenv("WHALE_HERMES_DB", os.path.expanduser("~/.hermes/state.db")))
 SILENCE_DOWN_MIN = 180          # 多久没人影就算"不在场"→ 不记负反馈
 
@@ -234,32 +242,81 @@ def deliver(text: str):
     return ok, out[:200]
 
 
-def llm(messages, timeout=25, max_tokens=200, temperature=1.05):
+def llm(messages, timeout=25, max_tokens=700, temperature=1.05, retries=3):
+    """调模型。★ 空回复要重试 —— 2026-09-23 的教训：
+
+    这个模型是**思考型**的：它会先花 token 想，再输出。长人设 + 大上下文下，
+    max_tokens=200 会被思考**吃光** → content 回来是空字符串 ✗
+    而调用方（决定说/不说）看到空前缀就判"不说" → **她一整天一句话都没发出去** ✗✗
+    （现象：日志每 42 分钟一条"决定不说（模型：空）"，连续 21 次）
+
+    修法：空回复 → max_tokens 翻三倍重试；并把 finish_reason 记进日志（下次一眼看出原因）。
+    """
     import yaml
     m = (yaml.safe_load(CONFIG.read_text(encoding="utf-8")) or {}).get("model") or {}
     base = (m.get("base_url") or "").rstrip("/")
     key = m.get("api_key") or ""
     if not base or not key:
         return ""
-    body = json.dumps({"model": m.get("default") or "deepseek-v4.1-flash",
-                       "messages": messages, "temperature": temperature,
-                       "max_tokens": max_tokens, "top_p": 0.95}, ensure_ascii=False).encode()
-    req = urllib.request.Request(base + "/chat/completions", data=body, method="POST")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Authorization", "Bearer " + key)
-    req.add_header("User-Agent", UA)                    # 不带 UA 会被 Cloudflare 403
-    req.add_header("Accept", "application/json")
-    for k, v in (m.get("default_headers") or {}).items():
-        req.add_header(k, str(v))
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return (json.loads(r.read().decode("utf-8", "replace"))
-                ["choices"][0]["message"]["content"] or "").strip()
+    mt = max_tokens
+    for attempt in range(max(1, retries)):
+        body = json.dumps({"model": m.get("default") or "deepseek-v4.1-flash",
+                           "messages": messages, "temperature": temperature,
+                           "max_tokens": mt, "top_p": 0.95}, ensure_ascii=False).encode()
+        req = urllib.request.Request(base + "/chat/completions", data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Authorization", "Bearer " + key)
+        req.add_header("User-Agent", UA)                    # 不带 UA 会被 Cloudflare 403
+        req.add_header("Accept", "application/json")
+        for k, v in (m.get("default_headers") or {}).items():
+            req.add_header(k, str(v))
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                data = json.loads(r.read().decode("utf-8", "replace"))
+        except Exception as e:
+            _dbg(f"模型调用失败（第 {attempt + 1} 次，max_tokens={mt}）：{type(e).__name__} {str(e)[:70]}")
+            mt *= 3
+            continue
+        ch = (data.get("choices") or [{}])[0]
+        msg = ch.get("message") or {}
+        content = (msg.get("content") or "").strip()
+        fr = ch.get("finish_reason")
+        # 空回复 → 重试；被长度截断 → 也重试（截断的半句话比空好不了多少，而她的话要能读）
+        if content and fr != "length":
+            return content
+        if content and fr == "length" and attempt == max(1, retries) - 1:
+            return content                    # 最后一次还是截断 → 至少把已有的给她（不丢空）
+        health_bump("model_empty")
+        _dbg(f"模型回复不完整（finish_reason={fr} · "
+             f"思考长度={len(str(msg.get('reasoning_content') or ''))} · max_tokens={mt}"
+             + (f" · 已有 {len(content)} 字" if content else "") + f"）→ 第 {attempt + 2} 次加倍重试")
+        mt *= 3
+    return ""
 
 
-def recent(n=6):
+def recent(n=6, today_only=True):
+    """最近说过的话。
+
+    ★ today_only 是**必须的**（2026-09-23 血的教训）：
+      判重窗口原来跨天 ✗ —— 我的"数字归桶"让昨天的"屏幕 945 分钟"和今天的"屏幕 556 分钟"
+      归到同一个桶 → 今天所有屏幕/社交类都被当成"昨天说过了" → **一整天一句话都发不出去** ✗✗
+      语义本来就该是"同一件事**今天**说过就不再重复" ✓
+      老记录没有 ts 字段 → 一律视为非今天（不再参与判重）✓
+    """
     try:
-        lines = RECENT_PATH.read_text(encoding="utf-8").splitlines()[-n:]
-        return [json.loads(x).get("text", "") for x in lines if x.strip()]
+        lines = RECENT_PATH.read_text(encoding="utf-8").splitlines()
+        recs = []
+        for x in lines:
+            if not x.strip():
+                continue
+            try:
+                recs.append(json.loads(x))
+            except Exception:
+                continue
+        today = datetime.now(TZ).strftime("%Y-%m-%d")
+        if today_only:
+            recs = [r for r in recs if str(r.get("ts") or "").startswith(today)]
+        return [str(r.get("text") or "") for r in recs[-n:]]
     except Exception:
         return []
 
@@ -473,6 +530,22 @@ def utility_gate(material: int) -> tuple:
     """
     p_accept, ok, bad = _load_feedback_stats()
     _src = "全局"
+    # ★★ 冷启动试探（2026-09-24 加，一周模拟发现的死锁）：
+    #   还没有任何反馈时，p_accept 恒等于 Beta(1,1)=0.50 < 0.67
+    #   → 只有"料≥3"才敢开口 → 模拟一周（正常作息）**一句话都说不出** ✗
+    #   而反馈又要求她先开口、主人才可能回 ✓ → 死锁 ✓
+    #   解法：没反馈时按"每天最多 COLD_START_PER_DAY 条"试探着说（explore ✓），
+    #        一旦收到反馈立刻交回 Thompson（exploit ✓）
+    if ok + bad == 0:
+        try:
+            n_today = len(recent(200, today_only=True))
+        except Exception:
+            n_today = 0
+        if n_today < COLD_START_PER_DAY:
+            health_bump("sent")
+            return True, (f"冷启动试探（还没反馈 {ok}✓/{bad}✗ → 先按每天 {COLD_START_PER_DAY} 条开口，"
+                          f"好把反馈收集起来；今天第 {n_today + 1} 条）")
+        return False, f"冷启动额度用完（今天已 {n_today} 条 / 上限 {COLD_START_PER_DAY}，且还没反馈）"
     try:
         bd = _band_posterior()
         band = _current_band()
@@ -663,11 +736,78 @@ def fingerprint(text: str):
     为什么要有它：光比"文字一样"没用 —— 换种说法（"08:00 那节在 5-409" / "5-409 那节课八点"）
     就被当成新消息了，于是同一件事被反复说（实测被说了五遍）。这里按"事"去重，不按"字"去重。
     """
-    nums = frozenset(re.findall(r"\d+", text))
-    kw = frozenset(k for k in ("节", "课", "教室", "屏幕", "睡", "睡眠", "血氧", "心率", "压力",
-                               "日程", "作业", "考试", "出门", "吃饭", "喝水", "眼", "钟", "闹钟")
-                   if k in text)
+    # ★ 数字要**归桶**，否则"社交 579 分钟"和"社交 586 分钟"会被当成两件事 ✗
+    #   （2026-09-22 实测：一小时内把同一个状态说了两遍，就是栽在这里）
+    #   规则：≥100 的按 60 归桶（579→600、586→600，同一桶 ✓）；小时/分钟/点数这类小数字保持精确
+    def _bucket(m):
+        v = int(m.group(0))
+        return str((v // 60) * 60) if v >= 100 else str(v)
+    nums = frozenset(_bucket(m) for m in re.finditer(r"\d+", text))
+    # ★ 话题词要覆盖"她实际会说的那几类"：原来缺"社交/时长/分钟/小时/使用/总结"（2026-09-22 补）
+    kw = frozenset(k for k in (
+        "节", "课", "教室", "屏幕", "睡", "睡眠", "血氧", "心率", "压力",
+        "日程", "作业", "考试", "出门", "吃饭", "喝水", "眼", "钟", "闹钟",
+        "社交", "时长", "分钟", "小时", "使用", "游戏", "订单", "快递",
+        "电量", "磁盘", "内存", "温度", "天气", "复盘", "总结",
+    ) if k in text)
     return nums, kw
+
+
+# ★★ 话题台账（2026-09-22 加）：指纹是"事后补漏"，这个是"事前一票否决"。
+#   规则：同一个话题今天已经说过 → 只有当**数值跨档**（例如屏幕时长多出 2 小时）才允许再说。
+#   为什么需要它：数字小改动（579→586）会绕过所有"相似度"判断 —— 相似度总会有边界，
+#   而"这个话题今天说过了"没有边界问题 ✓
+SAID_TODAY = {}          # {话题: [(跨档值, ts)]}
+
+
+def topic_of(text: str):
+    """把一条话归到一个话题 + 一个"跨档值"（用于判断是否真的变了）。"""
+    for topic, keys in (
+        ("社交时长", ("社交",)), ("屏幕时长", ("屏幕",)), ("游戏时长", ("游戏",)),
+        ("睡眠", ("睡", "睡眠")), ("课程", ("课", "教室", "节")), ("作业考试", ("作业", "考试")),
+        ("订单快递", ("订单", "快递")), ("天气", ("天气", "降雨", "雷阵")),
+        ("电脑体检", ("磁盘", "内存", "开机")), ("电量", ("电量", "充电")),
+        ("复盘总结", ("复盘", "总结")),
+    ):
+        if any(k in text for k in keys):
+            # ★ 只认**跟着时长单位**的数字（"945 分钟"/"15 小时"）——
+            #   不能用裸 \d+：总结句里的教室号 "7-515" 会被当成 515 分钟，
+            #   档位算歪 → 该拦的没拦住（2026-09-22 实测踩到 ✗）
+            vals = []
+            for num, unit in re.findall(r"(\d+)\s*(小时|分钟|分钟|分|[Hh])", text):
+                v = int(num)
+                vals.append(v * 60 if unit in ("小时", "H", "h") else v)
+            big = max(vals) if vals else 0
+            return topic, (big // 120)          # 每 120 一档：多出 2 小时才算"真变了"
+    return "", 0
+
+
+def topic_already_said_today(text: str) -> bool:
+    """这个话题今天说过、且没跨档 → 不再说。定点/紧急不经过这里（它们走另一条路）✓"""
+    topic, bucket = topic_of(text)
+    if not topic:
+        return False
+    today = datetime.now(TZ).strftime("%Y-%m-%d")
+    for old_bucket, ts in SAID_TODAY.get(topic, []):
+        if not str(ts).startswith(today):
+            continue
+        if abs(bucket - old_bucket) < 1:
+            return True
+        # ★ 新句子**没有大数字**（总结句常这样：只有"15 小时""8:00"）→ 判不出档位 →
+        #   保守起见一律拦下。2026-09-22 实测：睡前总结发完 15 分钟，主动通道又总结了一遍 ✗
+        if bucket == 0 and old_bucket != 0:
+            return True
+    return False
+
+
+def topic_mark_said(text: str):
+    topic, bucket = topic_of(text)
+    if not topic:
+        return
+    SAID_TODAY.setdefault(topic, []).append((bucket, datetime.now(TZ).isoformat(timespec="seconds")))
+    # 只留今天（跨天自动过期 ✓）
+    today = datetime.now(TZ).strftime("%Y-%m-%d")
+    SAID_TODAY[topic] = [(b, t) for b, t in SAID_TODAY[topic] if str(t).startswith(today)]
 
 
 def too_similar(text: str, n=10) -> bool:
@@ -712,9 +852,234 @@ def last_signature():
     return None
 
 
+# ★★ 已投递台账（2026-09-24 加，血的教训）：
+#   现象：睡前总结**连发三条** ✗。链路 = 取到提醒 → 发微信成功 → **ack 回执被 429 拒掉** ✗
+#   → 提醒在中枢里仍是"待发" → 下一轮又取到同一条 → 又发一遍 ✗✗
+#   解法：**发成功就本地记 id**；下次取到同 id 直接跳过并补回执 ✓
+#   （宁可"本地记了但中枢没收到回执"→ 多补一次 ack ✓ 也不能重复打扰主人 ✓）
+SENT_PATH = BASE / ".whale_sent_ids.jsonl"
+
+
+def _sent_ids_load():
+    ids = set()
+    try:
+        for line in SENT_PATH.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                ids.add(int(json.loads(line)["id"]))
+    except Exception:
+        pass
+    return ids
+
+
+def _sent_mark(rid):
+    try:
+        with SENT_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"id": int(rid), "ts": datetime.now(TZ).isoformat(timespec="seconds")},
+                               ensure_ascii=False) + "\n")
+        keep = SENT_PATH.read_text(encoding="utf-8").splitlines()[-500:]
+        SENT_PATH.write_text("\n".join(keep) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+# ★★ 时段窗口（2026-09-24 加）：提醒必须**在它该在的时段**发出去。
+#   实测事故：昨晚没发出去的"睡前提醒"（明早 08:00 有课、今晚别熬太晚）
+#   今早 09:46 才补发 ✗ → 内容跟时间完全错位 ✗（主人问"早上说晚上的事情干嘛"）
+#   规则：出了窗口 → **丢弃 + 回执**（不是补发 ✓ 过期的关心不是关心 ✗）
+KIND_WINDOW = {
+    "brief_bedtime":      (20, 2),      # 睡前总结：20:00~02:00（跨夜）
+    "brief_morning":      (5, 11),      # 早间简报：05:00~11:00
+    "brief_morning_part": (5, 11),
+}
+
+
+def _in_window(kind: str) -> bool:
+    """这条提醒现在发合适吗？没定义窗口的（课程/闹钟等）一律放行 ✓"""
+    win = KIND_WINDOW.get((kind or "").split(":")[0])
+    if not win:
+        return True
+    h = datetime.now(TZ).hour
+    a, b = win
+    return (a <= h < b) if a < b else (h >= a or h < b)
+
+
+def _ack_with_retry(rids, tries=3, wait=2.0):
+    """回执加重试 + 退避。
+
+    为什么必须：原来 ack 一次失败 → 提醒仍"待发" → 下一轮**又发一遍** ✗
+    （2026-09-24 实测：睡前总结连发三条 ✓ 栽在这）
+    """
+    ids = rids if isinstance(rids, list) else [rids]
+    for _x in ids:
+        _sent_mark(_x)          # ★ 先记账：宁可多补回执，也不重复打扰
+    for k in range(tries):
+        try:
+            hub("/ack", {"ids": ids, "for": TERMINAL})
+            return True
+        except Exception as e:
+            _dbg(f"回执失败（第 {k + 1}/{tries} 次）ids={ids}：{str(e)[:60]}")
+            time.sleep(wait * (k + 1))
+    return False
+
+
+# ══════════════════════════════════════════════════════════════════
+# ★★ 自检与看门狗（2026-09-24 加）
+#
+# 为什么要有它：今天线上连出四个故障，**每一个都是沉默失败** ✗
+#   ① 思考 token 吃光预算 → 模型返回空 → 判定"不说" → 一整天没发一条
+#   ② 判重窗口跨天 → 今天的屏幕/社交全被当成"昨天说过" → 又一天没发
+#   ③ ack 回执失败 → 提醒仍"待发" → 睡前总结连发三条
+#   ④ 昨晚的睡前提醒今早才补发 → 早上说晚上的事
+# 四个都不是崩溃 ✗ 而是"看起来正常地什么都不做" ✓ —— 日志里要翻几千行才发现 ✓
+# 所以：**把"她哑了"变成一个能被主动发现的事件** ✓
+# ══════════════════════════════════════════════════════════════════
+_wd_last = [0.0]        # 看门狗上次检查时间（节流：每 10 分钟一次 ✓）
+HEALTH_PATH = BASE / ".whale_health.json"
+WATCHDOG_SILENT_HOURS = int(os.getenv("WHALE_WATCHDOG_SILENT_HOURS", "6"))   # 活跃时段几小时没开口就报警
+WATCHDOG_MAX_ERRORS = int(os.getenv("WHALE_WATCHDOG_MAX_ERRORS", "5"))       # 连续错误几次就报警
+ALERT_PATH = BASE / ".whale_last_alert"                                     # 报警频率限制（每天最多一次）
+
+
+def _health_load() -> dict:
+    try:
+        return json.loads(HEALTH_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _health_save(d: dict):
+    try:
+        HEALTH_PATH.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def health_bump(key: str, n: int = 1):
+    """给今天的某个计数器 +n（sent / blocked_* / errors / model_empty …）。"""
+    d = _health_load()
+    today = datetime.now(TZ).strftime("%Y-%m-%d")
+    if d.get("day") != today:
+        d = {"day": today, "sent": 0, "errors": 0, "model_empty": 0, "blocked": {},
+             "last_sent_ts": d.get("last_sent_ts"), "last_sent_day": d.get("last_sent_day")}
+    if key == "blocked":
+        pass
+    elif key in ("sent", "errors", "model_empty"):
+        d[key] = int(d.get(key, 0)) + n
+        if key == "sent":
+            d["last_sent_ts"] = datetime.now(TZ).isoformat(timespec="seconds")
+            d["last_sent_day"] = today
+    else:
+        b = d.setdefault("blocked", {})
+        b[key] = int(b.get(key, 0)) + n
+    _health_save(d)
+    return d
+
+
+def watchdog_check(ctx: dict = None):
+    """看门狗：她是不是哑了？该开口却一直不开口 → 主动说一声 ✓
+
+    三种报警（都在**活跃时段**才判，免打扰时安静是正常的 ✓）：
+      a. 连续 errors ≥ N          → 大概率是接口/配置坏了
+      b. 模型返回空 ≥ N           → 今天那种"思考 token 吃光预算"
+      c. 活跃时段超过 N 小时没开口 → 任何我没预料到的静默原因
+    报警本身也走她自己的嘴（一条**说实话**的自查消息 ✓），每天最多一次 ✓
+    """
+    ctx = ctx or {}
+    if "material" not in ctx:
+        # 自己取：看有多少类数据有值（不依赖主循环的局部变量 ✓ 独立才可靠）
+        try:
+            prev = hub("/llm-preview").get("would_send_to_model") or {}
+            ctx["material"] = sum(1 for v in prev.values() if v)
+        except Exception:
+            ctx["material"] = 0
+    try:
+        h = datetime.now(TZ).hour
+        if h >= QUIET[0] or h < QUIET[1]:
+            return
+        d = _health_load()
+        today = datetime.now(TZ).strftime("%Y-%m-%d")
+        if d.get("day") != today:
+            return
+        # 报警频率限制
+        try:
+            if ALERT_PATH.read_text(encoding="utf-8").strip() == today:
+                return
+        except Exception:
+            pass
+        reasons = []
+        if int(d.get("errors", 0)) >= WATCHDOG_MAX_ERRORS:
+            reasons.append(f"接口连续出错 {d['errors']} 次")
+        if int(d.get("model_empty", 0)) >= WATCHDOG_MAX_ERRORS:
+            reasons.append(f"模型返回空 {d['model_empty']} 次")
+        last = d.get("last_sent_ts")
+        if last:
+            try:
+                dt = datetime.fromisoformat(last)
+                hours = (datetime.now(TZ) - dt).total_seconds() / 3600
+                # 只在"有料"时才怪她不说（没料本来就不该说 ✓）
+                if hours >= WATCHDOG_SILENT_HOURS and (ctx.get("material") or 0) >= 2:
+                    reasons.append(f"已经 {hours:.1f} 小时没开口（而今天有料）")
+            except Exception:
+                pass
+        if not reasons:
+            return
+        _dbg("⚠ 看门狗：" + "；".join(reasons) + " —— 发一条自查消息")
+        try:
+            ALERT_PATH.write_text(today, encoding="utf-8")
+        except Exception:
+            pass
+        msg = ("（自查）鲸鲸这边好像卡住了：" + "；".join(reasons) +
+               "。我把自己查了一遍，接下来会盯紧一点，主人不用管。")
+        try:
+            deliver(msg)
+            _dbg("看门狗自查消息已发出")
+        except Exception as e:
+            _dbg("看门狗自查消息发送失败：", str(e)[:80])
+    except Exception as e:
+        _dbg("看门狗自身异常（不影响主流程）：", str(e)[:80])
+
+
+def startup_selfcheck():
+    """启动自检：把"能不能干活"三件事当场验一遍，日志里一眼可见 ✓"""
+    print("[selfcheck] ── 启动自检 ──")
+    ok_all = True
+    # ① 中枢可达 + token 有效
+    try:
+        st = hub("/health")
+        print(f"[selfcheck] 中枢可达 ✓ version={st.get('version')}")
+    except Exception as e:
+        print(f"[selfcheck] ✗ 中枢不可达：{str(e)[:70]}")
+        ok_all = False
+    try:
+        n = len((hub("/pending?for=" + TERMINAL).get("items") or []))
+        print(f"[selfcheck] token 有效 ✓ 待发 {n} 条")
+    except Exception as e:
+        print(f"[selfcheck] ✗ token/待发接口异常：{str(e)[:70]}")
+        ok_all = False
+    # ② 模型可达（真调一次，最短输出）
+    try:
+        r = llm([{"role": "user", "content": "回一个字：好"}], max_tokens=300, retries=1, timeout=20)
+        print(f"[selfcheck] 模型可达 ✓ 返回 {r[:12]!r}" if r else "[selfcheck] ⚠ 模型返回空（检查 token/额度）")
+        ok_all = ok_all and bool(r)
+    except Exception as e:
+        print(f"[selfcheck] ✗ 模型调用失败：{str(e)[:70]}")
+        ok_all = False
+    # ③ 状态目录可写
+    try:
+        t = BASE / ".whale_write_test"
+        t.write_text("1", encoding="utf-8"); t.unlink()
+        print(f"[selfcheck] 状态目录可写 ✓ {BASE}")
+    except Exception as e:
+        print(f"[selfcheck] ✗ 状态目录不可写：{str(e)[:70]}")
+        ok_all = False
+    print(f"[selfcheck] 结论：{'一切正常 ✓' if ok_all else '有问题 ✗（见上，先修再指望她说话）'}")
+    return ok_all
+
+
 def remember(text, sig=None):
     """记下说过的话 + 当时的**状态签名**（后者给事实层去重用：值没变就别重复播报）。"""
-    rec = {"text": text}
+    rec = {"text": text, "ts": datetime.now(TZ).isoformat(timespec="seconds")}
     try:
         if sig is None:
             import whale_facts as _wf
@@ -743,6 +1108,16 @@ def relay_urgent():
     if not items:
         return False
     for _it in items:
+        if not _in_window(_it.get("kind") or ""):
+            health_bump("blocked", "out_of_window")
+            _dbg(f"#{_it.get('id')} 不在时段窗口（{_it.get('kind')} @ {datetime.now(TZ).strftime('%H:%M')}）→ 丢弃并回执，不补发")
+            _ack_with_retry(_it["id"])
+            continue
+        if int(_it.get("id") or 0) in _sent_ids_load():
+            health_bump("blocked", "already_sent")
+            _dbg(f"#{_it.get('id')} 本地已投递过 → 跳过并补回执")
+            _ack_with_retry(_it["id"])
+            continue
         if "bedtime" in (_it.get("kind") or ""):
             items = [_it]            # 睡前小总结要原样发、不润色 → 只处理它一条
             break
@@ -759,7 +1134,7 @@ def relay_urgent():
                 _dbg("合并投递失败：", str(e)[:120])
                 return False
             if ok:
-                hub("/ack", {"ids": ids, "for": TERMINAL})
+                _ack_with_retry(ids)
                 remember(merged)
                 time.sleep(GAP)
                 return True
@@ -775,7 +1150,7 @@ def relay_urgent():
         try:
             ok, info = deliver(fact)
             if ok:
-                hub("/ack", {"ids": [it["id"]], "for": TERMINAL})
+                _ack_with_retry(it["id"])
                 _dbg(f"#{it['id']} 睡前总结已发")
                 remember(fact)
                 time.sleep(GAP)
@@ -788,12 +1163,14 @@ def relay_urgent():
     import whale_voice
     if not kind.startswith("scheduled"):          # 定点提醒 = 主人自己要的，一律照发
         if too_similar(fact):
-            hub("/ack", {"ids": [it["id"]], "for": TERMINAL})
+            _ack_with_retry(it["id"])
+            health_bump("blocked", "dup_reminder")
             _dbg(f"#{it['id']} 跳过（与已说过的重复）：{fact[:30]}")
             return True
     text = whale_voice.speak(fact, fallback=fact)
     if too_similar(text):                          # 生成后仍重复 → 也跳过
-        hub("/ack", {"ids": [it["id"]], "for": TERMINAL})
+        _ack_with_retry(it["id"])
+        health_bump("blocked", "dup_generated")
         _dbg(f"#{it['id']} 跳过（生成后重复）：{text[:30]}")
         return True
     try:
@@ -802,7 +1179,7 @@ def relay_urgent():
         _dbg("投递失败：", str(e)[:120])
         return False
     if ok:
-        hub("/ack", {"ids": [it["id"]], "for": TERMINAL})
+        _ack_with_retry(it["id"])
         _dbg(f"#{it['id']} 已发：{text[:34]}")
         remember(text)
         time.sleep(GAP)
@@ -830,7 +1207,7 @@ def topic_kind(text: str) -> str:
 def _log_decision(kind: str, gap_sec: float, reason: str, material: int, st: dict) -> None:
     """结构化决策日志：把"为什么这么决定"发到中枢落库（回放器靠它）。"""
     try:
-        import whale_adapt as _wa  # band_key() 在 whale_adapt 里
+        import whale_adapt as _wa          # band_key() 在 whale_adapt 里
         band = _wa.band_key()
     except Exception:
         band = ""
@@ -911,6 +1288,7 @@ def maybe_speak():
     # 期望效用 gate：划不划算（Horvitz 1999）—— 只在"本来可以开口"时才评估
     allow, uw = utility_gate(score)
     if not allow:
+        health_bump("blocked", "gate")
         _dbg("期望效用不足 → 不说：" + uw)
         _log_decision("silent", gap, uw + "｜料=" + str(score), score, st)
         return
@@ -979,9 +1357,11 @@ def maybe_speak():
     if not out or "SILENT" in out.upper() or len(out) > 90:
         _st["silent"] = _st.get("silent", 0) + 1
         _save_pace(_st)
+        health_bump("blocked", "model_empty")
         _dbg(f"决定不说（模型：{out[:24] or '空'}）→ 连续沉默 {_st['silent']} 次")
         return
     if too_similar(out):
+        health_bump("blocked", "dup")
         _dbg(f"决定不说（与最近重复）：{out[:26]}")
         return
     # ★ 事实层新颖度：她在报数值状态，而这个状态自上次播报以来**没实质变化** → 没有新信息，别说。
@@ -994,9 +1374,11 @@ def maybe_speak():
             if not _ok_new:
                 _st["silent"] = _st.get("silent", 0) + 1
                 _save_pace(_st)
+                health_bump("blocked", "fact_unchanged")
                 _dbg("决定不说（数值状态自上次没变，没有新信息）：%s" % out[:26])
                 return
     except Exception as _e:
+        health_bump("blocked", "fact_dup")
         _dbg("事实去重跳过：%s" % str(_e)[:60])
     try:
         # Goldilocks 时间窗（arXiv:2504.09332）：话题放错时段 = 白打扰。
@@ -1004,6 +1386,7 @@ def maybe_speak():
         _kind = topic_kind(out)
         _h = time.localtime().tm_hour
         if not goldilocks_ok(_kind, _h):
+            health_bump("blocked", "topic_window")
             _dbg(f"话题『{_kind}』不在时间窗（{_h} 点）→ 这次不说")
             _log_decision("silent", 0, f"goldilocks：{_kind} 不在窗内（{_h} 点）", 0, pace())
             return False
@@ -1021,8 +1404,18 @@ def maybe_speak():
 
 def main():
     _dbg("启动：会拿主意的嘴（定点照发 / 平时自己判断要不要说）")
+    try:
+        startup_selfcheck()
+    except Exception as _e:
+        _dbg("自检异常：", str(_e)[:70])
     _fb = 0
     while True:
+        try:
+            if time.time() - _wd_last[0] > 600:
+                _wd_last[0] = time.time()
+                watchdog_check()
+        except Exception as _e:
+            _dbg("看门狗调度异常（不影响主流程）：", str(_e)[:70])
         try:
             _fb += 1
             if _fb % 15 == 0:                 # 约 30 秒取一次反馈（不必每 2 秒问）
@@ -1037,6 +1430,7 @@ def main():
                 maybe_speak()
                 time.sleep(POLL)
         except Exception as e:
+            health_bump("errors")
             _dbg("循环异常：", str(e)[:120])
             time.sleep(5)
 
