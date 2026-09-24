@@ -37,6 +37,20 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ hashFiles('collector/**/*.gradle*', 'collector/gradle/*.toml') }}
 
+      # ★ 固定签名密钥：AGP 默认的 debug 签名是**每台机器各自生成**的 ✗
+      #   → CI 每次跑出来的 APK 签名都不同 → 手机无法覆盖安装（必须卸载重装，设置全丢 ✗）
+      #   所以从 secret 还原一份**固定**的 debug keystore，让每版签名一致 ✓
+      - name: 写入固定签名密钥（保证能覆盖安装）
+        run: |
+          if [ -n "${{ secrets.DEBUG_KEYSTORE_B64 }}" ]; then
+            mkdir -p collector/keystore
+            printf '%s' "${{ secrets.DEBUG_KEYSTORE_B64 }}" | base64 -d > collector/keystore/debug.keystore
+            ls -l collector/keystore/debug.keystore
+            echo "✓ 已写入固定签名密钥（每版签名将一致 ✓）"
+          else
+            echo "::warning::没有 DEBUG_KEYSTORE_B64 → 本版会用随机 debug 签名（无法覆盖安装 ✗）"
+          fi
+
       - name: 构建（没有发布密钥 → release 走未签名，不会失败）
         working-directory: collector
         run: |
