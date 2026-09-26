@@ -68,7 +68,7 @@ except OSError:
     pass
 CFG_PATH = os.path.join(BASE, "hub.json")
 DB_PATH = os.path.join(BASE, "hub.db")
-VERSION = "0.1.25"
+VERSION = "0.1.26"
 TZ = timezone(timedelta(hours=8))          # 北京时间（用户在国内，固定 +8，避免服务器 UTC 漂移）
 
 DEFAULT_CFG = {
@@ -163,6 +163,7 @@ DEFAULT_CFG = {
         "sit_continuous_minutes": 50,    # 连续活跃 50 分钟没停（电脑采集器上报 pc.continuous_active_minutes）
         "class_remind_minutes": 0,       # 上课前提前几分钟提醒；**0 = 关掉**（用户不要这个刷屏）
         "device_offline_hours": 26,      # 设备超过 26 小时没上报 → 提示同步
+        "device_abandon_hours": 72,      # 失联超过 3 天 → 视为弃用，不再提醒（否则会天天念 ✗）
     },
 }
 
@@ -1587,8 +1588,19 @@ def analyze(day=None):
             except Exception:
                 continue
             if last < limit:
+                age_h = (datetime.now(TZ) - last).total_seconds() / 3600
+                # ★ 2026-09-25 修：这条曾经**反复念**（用户原话"怎么一直提醒我卡住了"）
+                #   原因有二：
+                #   ① 文案里带小时数（101 → 110）✗ 而下游去重是"原文完全相同才跳过" ✓
+                #      → 数字一变就被当成新消息 ✗ → 每轮都发 ✓ 所以改成按**天**取值 ✓
+                #      这样同一台设备在一天之内文案完全一致 ✓ 去重就能拦住 ✓
+                #   ② 已弃用的设备会**永远**满足"失联" ✓ 一直念 ✓
+                #      → 失联超过 3 天就不再提醒（那不是"没同步"，是设备不用了 ✓）
+                if age_h > CFG["rules"].get("device_abandon_hours", 72):
+                    continue
+                days = max(1, int(age_h // 24))
                 out.append({"level": "warn",
-                            "text": f"{row['device']} 的数据已经 {int((datetime.now(TZ) - last).total_seconds() // 3600)} 小时没同步了，看一眼设备。"})
+                            "text": f"{row['device']} 的数据已经 {days} 天没同步了，看一眼设备。"})
     return out
 
 

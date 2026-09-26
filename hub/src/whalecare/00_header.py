@@ -68,7 +68,7 @@ except OSError:
     pass
 CFG_PATH = os.path.join(BASE, "hub.json")
 DB_PATH = os.path.join(BASE, "hub.db")
-VERSION = "0.1.25"
+VERSION = "0.1.26"
 TZ = timezone(timedelta(hours=8))          # 北京时间（用户在国内，固定 +8，避免服务器 UTC 漂移）
 
 DEFAULT_CFG = {
@@ -163,6 +163,7 @@ DEFAULT_CFG = {
         "sit_continuous_minutes": 50,    # 连续活跃 50 分钟没停（电脑采集器上报 pc.continuous_active_minutes）
         "class_remind_minutes": 0,       # 上课前提前几分钟提醒；**0 = 关掉**（用户不要这个刷屏）
         "device_offline_hours": 26,      # 设备超过 26 小时没上报 → 提示同步
+        "device_abandon_hours": 72,      # 失联超过 3 天 → 视为弃用，不再提醒（否则会天天念 ✗）
     },
 }
 
